@@ -30,6 +30,9 @@ replacement on the same baseline, and redraws every markup from its geometry.
 
 ## Run it
 
+Python **3.10 or newer** (developed and tested on 3.12). Nothing else to
+install — no Node, no bundler, no database, no build step.
+
 ```bash
 python -m venv .venv
 # Windows:  .venv\Scripts\activate      POSIX:  source .venv/bin/activate
