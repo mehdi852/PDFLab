@@ -1,0 +1,2684 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>PDFLab</title>
+<style>
+  :root {
+    --bg: #f4f5f7;
+    --chrome: #1d2129;
+    --chrome-soft: #272c36;
+    --line: #363c48;
+    --text: #e9ecf1;
+    --muted: #99a2b3;
+    --accent: #3f8cff;
+    --warn: #f0a83c;
+    --bad: #ff6b6b;
+    --ok: #45c48a;
+    --page-gap: 18px;
+  }
+  * { box-sizing: border-box; }
+  html, body { height: 100%; margin: 0; }
+  body {
+    font: 13px/1.45 "Segoe UI", system-ui, -apple-system, sans-serif;
+    background: var(--bg); color: #1d2129;
+    display: flex; flex-direction: column; overflow: hidden;
+  }
+
+  header {
+    display: flex; align-items: center; gap: 10px;
+    height: 52px; padding: 0 14px; flex: none;
+    background: var(--chrome); color: var(--text);
+    border-bottom: 1px solid var(--line);
+  }
+  .brand { font-weight: 650; letter-spacing: .2px; white-space: nowrap; }
+  .brand span { color: var(--accent); }
+  .doc-name {
+    color: var(--muted); max-width: 34ch; overflow: hidden;
+    text-overflow: ellipsis; white-space: nowrap;
+  }
+  .spacer { flex: 1; }
+  .btn {
+    appearance: none; border: 1px solid var(--line); background: var(--chrome-soft);
+    color: var(--text); padding: 6px 11px; border-radius: 7px; cursor: pointer;
+    font: inherit; font-size: 12.5px; white-space: nowrap;
+  }
+  .btn:hover:not(:disabled) { background: #313846; }
+  .btn:disabled { opacity: .45; cursor: default; }
+  .btn.primary { background: var(--accent); border-color: var(--accent); color: #fff; font-weight: 600; }
+  .btn.primary:hover:not(:disabled) { background: #5a9bff; }
+  .btn.ghost { background: transparent; }
+  .zoom { display: flex; align-items: center; gap: 6px; }
+  .zoom button { width: 28px; padding: 6px 0; text-align: center; }
+  .zoom .pct { min-width: 46px; text-align: center; color: var(--muted); font-variant-numeric: tabular-nums; }
+
+  /* ---- markup toolbar ------------------------------------------------- */
+  .toolbar {
+    display: flex; align-items: center; gap: 4px; flex: none;
+    min-height: 46px; padding: 6px 12px; flex-wrap: wrap; row-gap: 6px;
+    background: var(--chrome-soft); color: var(--text);
+    border-bottom: 1px solid var(--line);
+  }
+  .toolbar .tgroup { display: flex; align-items: center; gap: 3px; }
+  .toolbar .tsep { width: 1px; height: 24px; background: var(--line); margin: 0 6px; flex: none; }
+  .toolbar .spacer { flex: 1; min-width: 8px; }
+  .hidden { display: none !important; }
+  .tbtn {
+    width: 32px; height: 32px; flex: none; padding: 0;
+    display: inline-flex; align-items: center; justify-content: center;
+    border: 1px solid transparent; border-radius: 7px;
+    background: transparent; color: #c3cad8; cursor: pointer; font: inherit;
+  }
+  .tbtn:hover:not(:disabled) { background: #333a48; color: #fff; }
+  .tbtn[aria-pressed="true"] { background: var(--accent); border-color: var(--accent); color: #fff; }
+  .tbtn:disabled { opacity: .4; cursor: default; }
+  .tbtn svg { width: 17px; height: 17px; display: block; }
+  .tbtn.small { width: 26px; height: 26px; font-size: 11.5px; font-weight: 700; }
+  .tbtn.small svg { width: 14px; height: 14px; }
+  .tbtn.wide { width: auto; padding: 0 9px; font-size: 12px; gap: 6px; }
+  .toolbar .field { display: flex; align-items: center; gap: 6px; }
+  .toolbar .lbl { color: var(--muted); font-size: 10.5px; text-transform: uppercase; letter-spacing: .07em; }
+  .toolbar input[type="color"] {
+    width: 26px; height: 26px; padding: 0; border: 1px solid var(--line);
+    border-radius: 6px; background: none; cursor: pointer;
+  }
+  .toolbar input[type="range"] { width: 74px; accent-color: var(--accent); cursor: pointer; }
+  .toolbar select, .toolbar input[type="number"] {
+    background: #2b313d; color: var(--text); border: 1px solid var(--line);
+    border-radius: 6px; padding: 4px 5px; font: inherit; font-size: 12px;
+  }
+  .toolbar input[type="number"] { width: 54px; }
+  .toolbar .readout { color: var(--muted); font-size: 11.5px; min-width: 30px; font-variant-numeric: tabular-nums; }
+  .swatch-btn {
+    width: 20px; height: 20px; flex: none; padding: 0; cursor: pointer;
+    border-radius: 5px; border: 1px solid rgba(255,255,255,.30);
+  }
+  .swatch-btn[aria-pressed="true"] { box-shadow: 0 0 0 2px var(--accent); border-color: #fff; }
+  .swatches { display: flex; align-items: center; gap: 4px; }
+
+  /* ---- markups drawn on the page -------------------------------------- */
+  /* The layer itself must not take the pointer: it spans the whole page, and
+     without this an empty div sits on top of the text layer and swallows every
+     hover and click meant for the text. The markups inside re-enable it. */
+  .annot-layer { position: absolute; inset: 0; pointer-events: none; }
+  .annot { position: absolute; pointer-events: auto; cursor: move; }
+  /* Selection follows the shape. A rectangle is the honest mark for a shape that
+     *is* a rectangle, and an ellipse gets a ring -- drawn as its own element
+     rather than with `outline`, which would depend on the browser rounding a
+     border-radius. Strokes use the halo below instead. */
+  .annot .ring {
+    position: absolute; inset: -4px; display: none; pointer-events: none;
+    border: 1.5px solid rgba(63,140,255,.6); border-radius: 3px;
+    box-shadow: 0 0 0 3px rgba(63,140,255,.10);
+  }
+  .annot-ellipse .ring { border-radius: 50%; }
+  .annot.selected .ring { display: block; }
+  .annot.editing .ring { display: none; }
+  .annot.editing { cursor: text; outline: 2px solid var(--accent); outline-offset: 0; }
+  /* A wide, translucent copy of the stroke drawn underneath the real one: the
+     stroke itself reads as selected, with no box around it. */
+  .annot .halo { display: none; }
+  .annot.selected .halo { display: block; }
+  .annot .handle {
+    position: absolute; right: -7px; bottom: -7px; width: 10px; height: 10px;
+    display: none; border-radius: 50%; background: #fff;
+    border: 2px solid var(--accent); box-shadow: 0 1px 3px rgba(16,24,40,.28);
+    cursor: nwse-resize;
+  }
+  .annot.selected .handle { display: block; }
+  .annot .kill {
+    position: absolute; top: -10px; right: -10px; width: 17px; height: 17px;
+    display: none; border-radius: 50%; background: #2c3140; color: #fff;
+    border: 1px solid #454d5e; font-size: 11px; line-height: 15px; text-align: center;
+    cursor: pointer;
+  }
+  .annot.selected .kill { display: block; }
+  .annot-text {
+    width: 100%; height: 100%; outline: none;
+    white-space: pre-wrap; overflow-wrap: break-word; cursor: inherit;
+  }
+  .annot-image img { width: 100%; height: 100%; display: block; pointer-events: none; }
+  /* Sized inline to the markup's true box: a percentage size here would fight
+     the viewBox and scale the artwork away from the exported geometry. */
+  .annot-ink svg, .annot-arrow svg, .annot-line svg {
+    display: block; overflow: visible; pointer-events: none;
+  }
+  .annot-ellipse { border-radius: 50%; }
+  .annot-highlight { border-radius: 2px; }
+  .annot-preview {
+    border: 1.5px dashed var(--accent); background: rgba(63,140,255,.14);
+    pointer-events: none;
+  }
+  /* The drag preview borrows the shape's own radius, so the ellipse tool shows a
+     dashed ellipse rather than a dashed rectangle around one. The rounding lives
+     on the kind rules above (`annot-ellipse`); only the square-ish kinds get a
+     small radius here. */
+  .annot-preview.annot-rect, .annot-preview.annot-highlight, .annot-preview.annot-text,
+  .annot-preview.annot-image { border-radius: 2px; }
+  /* While a drawing tool is active the page is a canvas, not a text editor:
+     descendants that re-enable pointer events must be switched off explicitly. */
+  .page.draw-hit { cursor: crosshair; }
+  .page.draw-hit .text-layer, .page.draw-hit .text-layer span,
+  .page.draw-hit .overlay, .page.draw-hit .overlay .edit,
+  .page.draw-hit .annot { pointer-events: none !important; }
+
+  .change .kindchip {
+    display: inline-block; border-radius: 4px; padding: 0 5px; margin-right: 5px;
+    font-size: 10px; font-weight: 600; text-transform: uppercase; letter-spacing: .04em;
+    background: #eaf2ff; color: #22539b;
+  }
+  .change.annot .pg { background: #eaf2ff; color: #22539b; }
+
+  main { flex: 1; display: flex; min-height: 0; }
+  .viewer {
+    flex: 1; overflow: auto; padding: var(--page-gap);
+    display: flex; flex-direction: column; align-items: center; gap: var(--page-gap);
+    background:
+      radial-gradient(circle at 20% 0%, #ffffff 0%, #eceef2 60%),
+      var(--bg);
+  }
+  .page-wrap { position: relative; flex: none; }
+  .page-wrap .badge {
+    position: absolute; top: -9px; left: -34px;
+    color: var(--muted); font-size: 11px; font-variant-numeric: tabular-nums;
+  }
+  .page {
+    position: relative; background: #fff; overflow: hidden;
+    box-shadow: 0 1px 2px rgba(16,24,40,.10), 0 12px 30px rgba(16,24,40,.13);
+    border-radius: 2px;
+  }
+  .page canvas { display: block; position: absolute; inset: 0; }
+  .layer { position: absolute; inset: 0; }
+
+  /* The text layer is invisible: the canvas above already paints the glyphs.
+     It exists purely to give each run of text an exact, clickable hit box. */
+  .text-layer { position: absolute; inset: 0; overflow: hidden; }
+  .text-layer span {
+    position: absolute; transform-origin: 0 0; white-space: pre;
+    color: transparent; cursor: text; border-radius: 2px;
+  }
+  .text-layer span:hover { background: rgba(63,140,255,.22); }
+  .text-layer.searching span.has-hit { background: rgba(255,214,64,.45); }
+
+  .overlay { position: absolute; inset: 0; pointer-events: none; }
+  .overlay .edit {
+    position: absolute; pointer-events: auto; outline: none;
+    overflow: hidden; white-space: pre; display: flex; align-items: center;
+    padding: 0 1px; cursor: text; border-radius: 2px;
+  }
+  .overlay .edit .txt {
+    outline: none; min-width: 2px; display: inline-block;
+    caret-color: #1d2129;
+  }
+  .overlay .edit.editing {
+    outline: 2px solid var(--accent); outline-offset: 0;
+    box-shadow: 0 0 0 4px rgba(63,140,255,.16);
+  }
+  .overlay .edit.flagged { outline: 2px dashed var(--warn); }
+  .overlay .edit.removal { color: transparent; position: absolute; }
+  .overlay .edit.removal::after {
+    content: ""; position: absolute; inset: 0;
+    background: repeating-linear-gradient(45deg,
+      rgba(255,107,107,.20) 0 5px, rgba(255,107,107,0) 5px 10px);
+    border: 1px dashed rgba(255,107,107,.55);
+  }
+  .overlay .edit .kill {
+    position: absolute; top: -9px; right: -9px; width: 17px; height: 17px;
+    border-radius: 50%; background: #2c3140; color: #fff; border: 1px solid #454d5e;
+    font-size: 11px; line-height: 15px; text-align: center; cursor: pointer;
+    opacity: 0; transition: opacity .1s;
+  }
+  .overlay .edit:hover .kill { opacity: 1; }
+
+  aside {
+    width: 336px; flex: none; border-left: 1px solid #dfe2e8; background: #fff;
+    display: flex; flex-direction: column; min-height: 0;
+  }
+  aside h2 {
+    font-size: 11px; text-transform: uppercase; letter-spacing: .09em;
+    color: #6b7488; margin: 0; padding: 13px 14px 8px;
+  }
+  .doc-meta { padding: 0 14px 12px; color: #5b6474; font-size: 12px; border-bottom: 1px solid #eceef2; }
+  .doc-meta b { color: #1d2129; font-weight: 600; }
+  .options { padding: 10px 14px; border-bottom: 1px solid #eceef2; }
+  .options label { display: flex; gap: 8px; align-items: flex-start; color: #4b5464; font-size: 12px; }
+  .options input { margin: 2px 0 0; }
+  .changes { flex: 1; overflow: auto; padding: 6px 8px 12px; min-height: 0; }
+  .change {
+    display: grid; grid-template-columns: 26px 1fr 20px; gap: 8px; align-items: start;
+    padding: 8px; border-radius: 8px; cursor: pointer;
+  }
+  .change:hover { background: #f4f6fa; }
+  .change.selected { background: #eef4ff; box-shadow: inset 0 0 0 1px #cfe0ff; }
+  .change .detail { color: #8b93a3; font-size: 11px; margin-top: 2px; }
+  .change .pg {
+    background: #eef1f6; color: #5b6474; border-radius: 5px; font-size: 11px;
+    text-align: center; padding: 2px 0; font-variant-numeric: tabular-nums;
+  }
+  .change .old { color: #8b93a3; text-decoration: line-through; word-break: break-word; }
+  .change .new { color: #1d2129; word-break: break-word; }
+  .change .new.empty { color: var(--bad); font-style: italic; }
+  .swatch {
+    display: inline-block; width: 9px; height: 9px; border-radius: 2px;
+    border: 1px solid rgba(0,0,0,.25); margin-right: 5px; vertical-align: baseline;
+  }
+  .change .rm { border: 0; background: none; color: #b6bcc9; cursor: pointer; font-size: 15px; line-height: 1; padding: 0; }
+  .change .rm:hover { color: var(--bad); }
+  .change .flag { color: #a06b12; background: #fdf3e0; border-radius: 4px; padding: 1px 5px;
+    font-size: 11px; display: inline-block; margin-top: 3px; }
+  .empty-note { color: #8b93a3; padding: 14px; font-size: 12px; }
+
+  /* Last export: an audit list, aligned on a grid instead of stacked with <br>s.
+     Each row is a centred status badge, the text that changed, then a meta line. */
+  .report { border-top: 1px solid #e3e7ee; background: #fff; flex: none; max-height: 42%; overflow: auto; }
+  .report:empty { display: none; }
+  .report .head {
+    position: sticky; top: 0; z-index: 1; background: #fff;
+    padding: 12px 14px 9px; border-bottom: 1px solid #eef1f6;
+  }
+  .report .head .top { display: flex; align-items: baseline; gap: 8px; }
+  .report .head h2 { padding: 0; flex: none; }
+  .report .head .counts {
+    margin-left: auto; font-size: 11px; color: #6b7488;
+    font-variant-numeric: tabular-nums; white-space: nowrap;
+  }
+  .report .head .counts .ok { color: #14724a; font-weight: 600; }
+  .report .head .counts .warn { color: #8a5b0a; font-weight: 600; }
+  .report .head .file {
+    margin-top: 4px; color: #8b93a3; font-size: 11.5px;
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  }
+  .report .rows { padding: 2px 8px 10px; }
+  .report .row {
+    display: grid; grid-template-columns: 92px minmax(0, 1fr); gap: 11px;
+    align-items: start; padding: 10px 6px 11px; border-radius: 8px;
+  }
+  .report .row + .row { border-top: 1px solid #f2f4f8; }
+  .report .row:hover { background: #f8fafd; }
+  /* The badge is a full-width cell and its label is centred in it. */
+  .report .pill {
+    display: flex; align-items: center; justify-content: center; gap: 5px;
+    height: 22px; padding: 0 7px; border-radius: 6px; box-sizing: border-box;
+    font-size: 11px; font-weight: 600; letter-spacing: .01em;
+    white-space: nowrap; overflow: hidden;
+  }
+  .report .pill .dot { width: 6px; height: 6px; border-radius: 50%; background: currentColor; flex: none; }
+  .report .pill.ok { background: #e7f7ef; color: #14724a; }
+  .report .pill.warn { background: #fdf3e0; color: #8a5b0a; }
+  .report .pill.bad { background: #fdeaea; color: #a02020; }
+  .report .body { min-width: 0; }
+  /* Clamped to two lines: an audit row must stay the same shape whether the
+     replaced sentence ran to three words or thirty. The full text is in the
+     row's title. */
+  .report .line {
+    font-size: 12.5px; line-height: 1.5;
+    display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden;
+  }
+  .report .pg {
+    display: inline-block; vertical-align: 1px; margin-right: 6px;
+    background: #eef1f6; color: #5b6474; border-radius: 5px; padding: 1px 6px;
+    font-size: 10.5px; font-weight: 600; font-variant-numeric: tabular-nums;
+  }
+  .report .old { color: #98a1b0; text-decoration: line-through; text-decoration-color: #d3d9e3; }
+  .report .arrow { color: #b6bcc9; }
+  .report .new { color: #1d2129; }
+  .report .meta-line {
+    display: flex; flex-wrap: wrap; align-items: center; gap: 5px;
+    margin-top: 6px; color: #7b8494; font-size: 11px;
+  }
+  .report .meta-line .swatch { margin-right: 0; }
+  .report .meta-line .fontpill { margin-left: 0; }
+  .report .note {
+    margin-top: 5px; color: #9aa3b2; font-size: 11px; line-height: 1.45;
+    display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden;
+  }
+  /* A warning is the actionable part of a row: it gets its own alert treatment
+     and is never clamped away. */
+  .report .note.warn {
+    color: #8a5b0a; display: block; -webkit-line-clamp: unset; overflow: visible;
+    margin-top: 7px; padding: 4px 8px; background: #fffaf1;
+    border-left: 2px solid #e8a33d; border-radius: 0 5px 5px 0;
+  }
+  .fontpill {
+    border-radius: 999px; padding: 0 6px; font-size: 10.5px; margin-left: 5px;
+    background: #eef1f6; color: #5b6474; white-space: nowrap;
+  }
+  .fontpill.ok { background: #e7f7ef; color: #1d7a4f; }
+  .fontpill.info { background: #eaf2ff; color: #22539b; }
+  .fontpill.warn { background: #fdf3e0; color: #96650f; }
+
+  .status {
+    flex: none; border-top: 1px solid #dfe2e8; padding: 9px 14px; font-size: 12px;
+    color: #4b5464; min-height: 36px; display: flex; align-items: center; gap: 8px;
+  }
+  .status.err { color: #a52a2a; background: #fdf3f3; }
+  .status.ok { color: #1d7a4f; }
+  .status .dot { width: 7px; height: 7px; border-radius: 50%; background: var(--muted); flex: none; }
+  .status.ok .dot { background: var(--ok); }
+  .status.err .dot { background: var(--bad); }
+  .status.ok .dot { background: var(--ok); }
+
+  .welcome {
+    max-width: 560px; margin: auto; text-align: center; color: #5b6474;
+    background: #fff; border: 1px solid #e3e6ec; border-radius: 14px; padding: 30px 34px;
+    box-shadow: 0 10px 30px rgba(16,24,40,.06);
+  }
+  .welcome h1 { margin: 0 0 8px; font-size: 19px; color: #1d2129; }
+  .welcome p { margin: 0 0 18px; }
+  .welcome .row { display: flex; gap: 10px; justify-content: center; }
+  .welcome .btn { background: #fff; color: #1d2129; border-color: #d3d8e0; }
+  .welcome .btn.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
+  .welcome .btn:hover:not(:disabled) { background: #f4f6fa; }
+  .welcome .btn.primary:hover:not(:disabled) { background: #5a9bff; }
+  .welcome ol { text-align: left; color: #6b7488; font-size: 12.5px; margin: 18px 0 0; padding-left: 20px; }
+  .welcome li { margin: 3px 0; }
+</style>
+</head>
+<body>
+<header>
+  <div class="brand">PDF <span>Editor</span></div>
+  <div class="doc-name" id="docName">no document</div>
+  <div class="spacer"></div>
+  <div class="zoom">
+    <button class="btn ghost" id="zoomOut" title="Zoom out">&minus;</button>
+    <span class="pct" id="zoomLabel">100%</span>
+    <button class="btn ghost" id="zoomIn" title="Zoom in">+</button>
+  </div>
+  <label class="btn" for="fileInput">Open PDF</label>
+  <input type="file" id="fileInput" accept="application/pdf,.pdf" hidden />
+  <button class="btn ghost" id="sampleBtn">Load sample</button>
+  <button class="btn primary" id="exportBtn" disabled>Export PDF</button>
+</header>
+
+<div class="toolbar" id="toolbar" role="toolbar" aria-label="Markup tools">
+  <div class="tgroup" id="toolButtons">
+    <button class="tbtn" data-tool="select" title="Select and edit text (V)" aria-pressed="true">
+      <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M3.5 2.2l8.6 5.4-3.9.8-1.9 3.9z" fill="currentColor"/></svg>
+    </button>
+    <button class="tbtn" data-tool="text" title="Add a text box (T)">
+      <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" aria-hidden="true"><path d="M3 4.2V3h10v1.2M8 3v10M6 13h4"/></svg>
+    </button>
+    <button class="tbtn" data-tool="image" title="Insert an image (I)">
+      <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true"><rect x="2.2" y="3.2" width="11.6" height="9.6" rx="1.6"/><circle cx="5.9" cy="6.6" r="1"/><path d="M2.6 11.6l3.3-3.1 2.4 2.2 2.2-1.9 2.9 2.6"/></svg>
+    </button>
+    <button class="tbtn" data-tool="pen" title="Freehand pen (P)">
+      <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M2.6 13.4l.7-2.9 7-7 2.2 2.2-7 7zM9.3 4.6l2.2 2.2"/></svg>
+    </button>
+    <button class="tbtn" data-tool="highlight" title="Highlighter (H)">
+      <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M2.5 13.5h11M5.4 10.6L10 6l2.4 2.4-4.6 4.6H5.4zM10 6l1.4-1.4a1.2 1.2 0 011.7 0l.7.7a1.2 1.2 0 010 1.7L12.4 8.4"/></svg>
+    </button>
+    <button class="tbtn" data-tool="arrow" title="Arrow (A)">
+      <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 13L12.6 3.4M7.4 3.4h5.2v5.2"/></svg>
+    </button>
+    <button class="tbtn" data-tool="rect" title="Rectangle (R)">
+      <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" aria-hidden="true"><rect x="2.4" y="4" width="11.2" height="8" rx="1.2"/></svg>
+    </button>
+    <button class="tbtn" data-tool="ellipse" title="Ellipse (O)">
+      <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" aria-hidden="true"><ellipse cx="8" cy="8" rx="5.6" ry="4.2"/></svg>
+    </button>
+  </div>
+
+  <span class="tsep"></span>
+
+  <div class="tgroup" id="optStroke">
+    <span class="lbl">Colour</span>
+    <div class="swatches" id="inkSwatches"></div>
+    <input type="color" id="inkColor" value="#1d2129" title="Custom colour" />
+  </div>
+  <div class="tgroup" id="optWidth">
+    <span class="lbl">Width</span>
+    <input type="range" id="inkWidth" min="0.5" max="16" step="0.5" value="2.5" title="Stroke width" />
+    <span class="readout" id="inkWidthVal">2.5</span>
+  </div>
+  <div class="tgroup" id="optOpacity">
+    <span class="lbl">Opacity</span>
+    <input type="range" id="inkOpacity" min="0.1" max="1" step="0.05" value="1" title="Opacity" />
+    <span class="readout" id="inkOpacityVal">100%</span>
+  </div>
+  <div class="tgroup" id="optFill">
+    <button class="tbtn wide" id="fillBtn" aria-pressed="false" title="Fill this shape">Fill</button>
+  </div>
+
+  <div class="tgroup" id="optFont">
+    <select id="fontFamily" title="Typeface">
+      <option value="">Match document</option>
+      <option value="sans">Helvetica</option>
+      <option value="serif">Times New Roman</option>
+      <option value="mono">Courier</option>
+    </select>
+    <input type="number" id="fontSize" min="4" max="200" step="1" value="12" title="Font size in points" />
+    <button class="tbtn small" id="boldBtn" aria-pressed="false" title="Bold">B</button>
+    <button class="tbtn small" id="italicBtn" aria-pressed="false" title="Italic"><span style="font-style:italic">I</span></button>
+    <button class="tbtn small" id="alignLeft" title="Align left">
+      <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" aria-hidden="true"><path d="M2.5 4h11M2.5 7h7M2.5 10h11M2.5 13h7"/></svg>
+    </button>
+    <button class="tbtn small" id="alignCenter" title="Align centre">
+      <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" aria-hidden="true"><path d="M2.5 4h11M4.5 7h7M2.5 10h11M4.5 13h7"/></svg>
+    </button>
+    <button class="tbtn small" id="alignRight" title="Align right">
+      <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" aria-hidden="true"><path d="M2.5 4h11M6.5 7h7M2.5 10h11M6.5 13h7"/></svg>
+    </button>
+  </div>
+
+  <div class="tgroup" id="optImage">
+    <button class="tbtn wide" id="pickImage" title="Insert an image (I)">Choose image…</button>
+    <input type="file" id="imageInput" accept="image/png,image/jpeg,image/webp" hidden />
+  </div>
+
+  <span class="spacer"></span>
+
+  <div class="tgroup" id="optObject">
+    <button class="tbtn wide" id="resetStyleBtn" title="Go back to the document's own colour, size and font">Auto style</button>
+    <button class="tbtn" id="deleteObject" title="Delete the selection (Delete)">
+      <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" aria-hidden="true"><path d="M3.4 4.6h9.2M6.4 4.6V3.2h3.2v1.4M4.6 4.6l.6 8.2h5.6l.6-8.2M6.8 7v3.6M9.2 7v3.6"/></svg>
+    </button>
+  </div>
+  <div class="tgroup">
+    <button class="tbtn wide" id="clearMarkups" title="Remove every markup and text change">Clear all</button>
+  </div>
+</div>
+
+<main>
+  <div class="viewer" id="viewer">
+    <div class="welcome" id="welcome">
+      <h1>Edit the text of a PDF, for real</h1>
+      <p>Click any word to change it. What you see drawn on the page is a preview;
+         on export the coordinates go to the server, which finds the original text,
+         removes it and writes yours in its place.</p>
+      <div class="row">
+        <label class="btn primary" for="fileInput">Open a PDF</label>
+        <button class="btn" id="sampleBtn2">Try the sample</button>
+      </div>
+      <ol>
+        <li>Click a word — it becomes editable in place.</li>
+        <li>Type the replacement, press Enter. Clear the text and press Enter to delete.</li>
+        <li>Or pick a tool from the toolbar: pen, highlighter, arrow, shapes, text boxes, images.</li>
+        <li>Export: the server removes the old glyphs, writes the new ones on the same baseline,
+            and redraws every markup from its coordinates.</li>
+      </ol>
+    </div>
+  </div>
+
+  <aside>
+    <h2>Document</h2>
+    <div class="doc-meta" id="docMeta">Nothing loaded yet.</div>
+    <div class="options">
+      <label>
+        <input type="checkbox" id="autofit" />
+        <span>Shrink replacements to fit the original text width
+          <br /><span style="color:#8b93a3">Off by default: text keeps the original size and may run past the box.</span></span>
+      </label>
+    </div>
+    <h2>Changes <span id="changeCount" style="color:#1d2129"></span></h2>
+    <div class="changes" id="changes">
+      <div class="empty-note">No changes yet. Click any text on the page to edit it.</div>
+    </div>
+    <div class="report" id="report"></div>
+    <div class="status" id="status"><span class="dot"></span><span id="statusText">Ready.</span></div>
+  </aside>
+</main>
+
+<script type="module">
+// pdfjs-dist is pinned to the 4.x line: the rendering API is stable across it.
+const PDFJS = "https://cdn.jsdelivr.net/npm/pdfjs-dist@4/build";
+
+let pdfjsLib;
+try {
+  pdfjsLib = await import(`${PDFJS}/pdf.min.mjs`);
+  pdfjsLib.GlobalWorkerOptions.workerSrc = `${PDFJS}/pdf.worker.min.mjs`;
+} catch (err) {
+  document.getElementById("status").className = "status err";
+  document.getElementById("statusText").textContent =
+    "Could not load pdf.js from the CDN. Check your internet connection and reload.";
+  throw err;
+}
+
+const $ = (id) => document.getElementById(id);
+const viewer = $("viewer");
+const changesEl = $("changes");
+const reportEl = $("report");
+
+const state = {
+  meta: null,          // upload response
+  pdf: null,           // pdf.js document proxy
+  scale: 1,
+  dpr: Math.min(window.devicePixelRatio || 1, 2),
+  pages: [],           // [{ index, pdfPage, viewport, unscaled, canvas, layer, overlay, annot, wrap, source }]
+  edits: new Map(),    // id -> edit
+  activeId: null,
+  annotations: new Map(), // id -> a markup drawn on top of a page
+  selected: null,      // the edit or markup the toolbar is pointed at
+  tool: "select",
+  style: null,         // the current tool's colour / width / font settings
+  toolStyle: {},       // per-tool memory, so the pen and the highlighter differ
+  gesture: null,       // the drag in progress
+  pendingImage: null,  // an image waiting to be placed by the next drag
+  seq: 0,
+  busy: false,
+  renderToken: 0,
+};
+
+// ---------------------------------------------------------------------------
+// coordinates
+//
+// The browser works in display space (rotation already applied by the
+// viewport). The server works in unrotated page space, top-left origin. These
+// four functions are the entire bridge, and `selfTest()` round-trips them.
+// ---------------------------------------------------------------------------
+
+function cssBoxToPdf(page, x0, y0, x1, y1) {
+  const vp = page.unscaled;
+  const view = page.pdfPage.view;                 // cropbox in PDF user space
+  const [ax, ay] = vp.convertToPdfPoint(Math.min(x0, x1), Math.min(y0, y1));
+  const [bx, by] = vp.convertToPdfPoint(Math.max(x0, x1), Math.max(y0, y1));
+  return [
+    Math.min(ax, bx) - view[0],
+    view[3] - Math.max(ay, by),                   // flip to top-left origin
+    Math.max(ax, bx) - view[0],
+    view[3] - Math.min(ay, by),
+  ];
+}
+
+function pdfBoxToCss(page, rect) {
+  const vp = page.viewport;
+  const view = page.pdfPage.view;
+  const [ax, ay] = vp.convertToViewportPoint(rect[0] + view[0], view[3] - rect[3]);
+  const [bx, by] = vp.convertToViewportPoint(rect[2] + view[0], view[3] - rect[1]);
+  return { x0: Math.min(ax, bx), y0: Math.min(ay, by), x1: Math.max(ax, bx), y1: Math.max(ay, by) };
+}
+
+/**
+ * A single point, display space (CSS px, already zoomed) to the server's space.
+ *
+ * The box helpers above deal in *unscaled* CSS px; a pointer event arrives
+ * already multiplied by the zoom, so markups convert through the scaled
+ * viewport instead. Same rotation handling, unlike the pair above this one must
+ * not be mixed up with `cssBoxToPdf`.
+ */
+function viewPointToPdf(page, x, y) {
+  const view = page.pdfPage.view;
+  const [px, py] = page.viewport.convertToPdfPoint(x, y);
+  return [px - view[0], view[3] - py];
+}
+
+function pdfPointToView(page, [x, y]) {
+  const view = page.pdfPage.view;
+  return page.viewport.convertToViewportPoint(x + view[0], view[3] - y);
+}
+
+function elementBoxInPage(page, el) {
+  const pageRect = page.wrap.getBoundingClientRect();
+  const r = el.getBoundingClientRect();
+  const s = state.scale;
+  return [(r.left - pageRect.left) / s, (r.top - pageRect.top) / s,
+          (r.right - pageRect.left) / s, (r.bottom - pageRect.top) / s];
+}
+
+/**
+ * The on-screen box for one run of text, at any page rotation.
+ *
+ * A span laid out horizontally only matches the glyphs when the page is
+ * unrotated. Instead the run's baseline direction and ascent direction are
+ * taken from the text transform, turned into a quad in PDF user space and
+ * mapped through the viewport; the axis-aligned box of that quad is what the
+ * user actually sees, whatever the page rotation.
+ */
+function itemGeometry(viewport, item) {
+  const m = item.transform;
+  const fontSize = Math.hypot(m[2], m[3]);
+  if (!(fontSize > 0)) return null;
+  const dirLen = Math.hypot(m[0], m[1]) || 1;
+  const ux = m[0] / dirLen, uy = m[1] / dirLen;        // along the baseline
+  const vx = m[2] / fontSize, vy = m[3] / fontSize;    // towards the ascenders
+  const ox = m[4], oy = m[5];                          // baseline origin, PDF user space
+  const width = item.width || 0;
+  const up = fontSize * 0.84, down = fontSize * 0.24;
+  const corners = [
+    [ox, oy],
+    [ox + ux * width, oy + uy * width],
+    [ox + ux * width + vx * up, oy + uy * width + vy * up],
+    [ox + vx * up, oy + vy * up],
+    [ox - vx * down, oy - vy * down],
+    [ox + ux * width - vx * down, oy + uy * width - vy * down],
+  ];
+  const points = corners.map(([x, y]) => viewport.convertToViewportPoint(x, y));
+  const xs = points.map((p) => p[0]);
+  const ys = points.map((p) => p[1]);
+  // Direction the text reads on screen, so rotated runs can be drawn rotated.
+  const start = viewport.convertToViewportPoint(ox, oy);
+  const along = viewport.convertToViewportPoint(ox + ux * dirLen, oy + uy * dirLen);
+  return {
+    left: Math.min(...xs), top: Math.min(...ys),
+    right: Math.max(...xs), bottom: Math.max(...ys),
+    fontSize,
+    angle: (Math.atan2(along[1] - start[1], along[0] - start[0]) * 180) / Math.PI,
+  };
+}
+
+/** Round-trip check: CSS -> PDF -> CSS must land back where it started. */
+function selfTest() {
+  const results = [];
+  for (const page of state.pages) {
+    const probes = [[10, 10, 90, 30], [100, 200, 300, 240], [5, 5, 12, 18]];
+    for (const probe of probes) {
+      const back = pdfBoxToCss(page, cssBoxToPdf(page, ...probe));
+      const drift = Math.max(...probe.map((v, i) => Math.abs(v - [back.x0, back.y0, back.x1, back.y1][i])));
+      results.push({ page: page.index, rotation: page.pdfPage.rotate, probe, drift: +drift.toFixed(4) });
+    }
+  }
+  return results;
+}
+
+// ---------------------------------------------------------------------------
+// rendering
+// ---------------------------------------------------------------------------
+
+async function loadMeta(meta) {
+  state.meta = meta;
+  state.edits.clear();
+  state.activeId = null;
+  state.seq = 0;
+  reportEl.innerHTML = "";
+  $("docName").textContent = meta.name;
+  $("docMeta").innerHTML =
+    `<b>${escapeHtml(meta.name)}</b><br>${meta.page_count} page${meta.page_count === 1 ? "" : "s"} · ${formatSize(meta.size)}`;
+  $("welcome")?.remove();
+
+  setStatus("Loading document…");
+  state.pdf = await pdfjsLib.getDocument({ url: `/api/documents/${meta.id}/file` }).promise;
+  state.annotations.clear();
+  state.selected = null;
+  state.gesture = null;
+  state.pendingImage = null;
+  setTool("select");
+  await buildPages();
+  renderChangeList();
+  updateExportButton();
+  setStatus(`Loaded ${meta.page_count} page${meta.page_count === 1 ? "" : "s"}. Click any text to edit it, or pick a tool.`, "ok");
+}
+
+async function buildPages() {
+  viewer.querySelectorAll(".page-wrap").forEach((el) => el.remove());
+  state.pages = [];
+  for (let index = 0; index < state.pdf.numPages; index++) {
+    // pdf.js page numbers are 1-based; everything else in this app is 0-based.
+    const pdfPage = await state.pdf.getPage(index + 1);
+    const wrap = document.createElement("div");
+    wrap.className = "page-wrap";
+    const badge = document.createElement("div");
+    badge.className = "badge";
+    badge.textContent = String(index + 1);
+    const pageEl = document.createElement("div");
+    pageEl.className = "page";
+    const canvas = document.createElement("canvas");
+    const textLayer = document.createElement("div");
+    textLayer.className = "layer text-layer";
+    const overlay = document.createElement("div");
+    overlay.className = "layer overlay";
+    // Markups live in their own layer so a drawing tool never has to fight the
+    // text layer or the edit boxes for the pointer.
+    const annot = document.createElement("div");
+    annot.className = "layer annot-layer";
+    pageEl.append(canvas, textLayer, overlay, annot);
+    wrap.append(badge, pageEl);
+    viewer.append(wrap);
+
+    const page = { index, pdfPage, canvas, layer: textLayer, overlay, annot, wrap, pageEl,
+                   viewport: null, unscaled: pdfPage.getViewport({ scale: 1 }), source: null };
+    state.pages.push(page);
+    await paintPage(page);
+  }
+  repositionAll();
+}
+
+async function paintPage(page) {
+  const viewport = page.pdfPage.getViewport({ scale: state.scale });
+  page.viewport = viewport;
+  const { canvas } = page;
+  canvas.width = Math.floor(viewport.width * state.dpr);
+  canvas.height = Math.floor(viewport.height * state.dpr);
+  canvas.style.width = `${viewport.width}px`;
+  canvas.style.height = `${viewport.height}px`;
+  page.pageEl.style.width = `${viewport.width}px`;
+  page.pageEl.style.height = `${viewport.height}px`;
+
+  const ctx = canvas.getContext("2d", { willReadFrequently: true });
+  ctx.setTransform(1, 0, 0, 1, 0, 0);
+  ctx.clearRect(0, 0, canvas.width, canvas.height);
+  await page.pdfPage.render({
+    canvasContext: ctx,
+    viewport,
+    transform: state.dpr === 1 ? null : [state.dpr, 0, 0, state.dpr, 0, 0],
+  }).promise;
+
+  await buildTextLayer(page);
+  positionAnnotations(page);
+}
+
+async function buildTextLayer(page) {
+  const layer = page.layer;
+  const viewport = page.viewport;
+  const content = await page.pdfPage.getTextContent();
+  const items = content.items.filter((it) => it.str && it.str.trim());
+  const fragment = document.createDocumentFragment();
+  // pdf.js only registers a web font for the faces it had to load, and those are
+  // the only ones a text item's fontName can name: for a standard-14 run the
+  // page is painted from pdf.js's built-in data and nothing is registered under
+  // that name. Naming it anyway makes the browser fall through to the next entry
+  // silently -- which is how a bold run ended up previewing in regular weight.
+  const loadedFamilies = new Set([...document.fonts].map((f) => f.family));
+
+  for (const item of items) {
+    const geom = itemGeometry(viewport, item);
+    if (!geom) continue;
+    const span = document.createElement("span");
+    span.textContent = item.str;
+    span.style.left = `${geom.left}px`;
+    span.style.top = `${geom.top}px`;
+    span.style.width = `${Math.max(geom.right - geom.left, 2)}px`;
+    span.style.height = `${Math.max(geom.bottom - geom.top, 2)}px`;
+    span.style.fontSize = `${geom.fontSize * state.scale}px`;
+    span.dataset.size = String(geom.fontSize);
+    span.dataset.text = item.str;
+    span.dataset.fontName = item.fontName || "";
+    span.dataset.angle = String(geom.angle);
+    // The name pdf.js loaded this face under, usable directly as a CSS family.
+    span.dataset.cssFont = loadedFamilies.has(item.fontName) ? item.fontName : "";
+    span.dataset.genericFont = content.styles?.[item.fontName]?.fontFamily
+      || (/mono|courier/i.test(item.fontName || "") ? "monospace" : "sans-serif");
+    fragment.append(span);
+  }
+
+  layer.textContent = "";
+  layer.append(fragment);
+}
+
+function repositionAllEdits() {
+  for (const edit of state.edits.values()) positionEdit(edit);
+}
+
+function positionAnnotations(page = null) {
+  for (const ann of state.annotations.values()) {
+    if (!page || ann.page === page.index) positionAnnotation(ann);
+  }
+}
+
+function repositionAll() {
+  repositionAllEdits();
+  positionAnnotations();
+}
+
+function positionEdit(edit) {
+  const page = state.pages[edit.page];
+  const el = edit.el;
+  if (!page || !el) return;
+  const box = pdfBoxToCss(page, edit.rect);
+  const rotated = Math.abs(edit.angle || 0) > 1;
+  const padY = rotated ? 0 : Math.max(1, (box.y1 - box.y0) * 0.12);
+  el.style.left = `${box.x0 - 1}px`;
+  el.style.top = `${box.y0 - padY}px`;
+  el.style.height = `${box.y1 - box.y0 + padY * 2}px`;
+  el.style.overflow = rotated ? "visible" : "hidden";
+  if (rotated) {
+    // A rotated run's laid-out width is horizontal, which would stretch this box
+    // far past the glyphs and paint its background across the page. Pin the box
+    // to the glyph area and let the turned text spill out without a backdrop.
+    el.style.width = `${box.x1 - box.x0 + 2}px`;
+    el.style.minWidth = "0px";
+  } else {
+    // Un-rotated: let the box grow with the replacement so longer text still
+    // covers the old glyphs.
+    el.style.width = "";
+    el.style.minWidth = `${box.x1 - box.x0 + 2}px`;
+  }
+  const size = (edit.sizeOverride || edit.displaySize || 11) * state.scale;
+  el.style.fontSize = `${size}px`;
+  el.style.lineHeight = `${Math.max(box.y1 - box.y0, size) + padY * 2}px`;
+  // A requested family replaces the document's own; otherwise the preview keeps
+  // showing the original face, which is what the export will reuse.
+  el.style.fontFamily = edit.familyOverride
+    ? requestedFamilyStack(edit.familyOverride)
+    : fontStack(edit);
+  el.style.fontWeight = weightCss(edit);
+  el.style.fontStyle = edit.italic ? "italic" : "";
+  // The document's own face is often the bold cut already (pdf.js registers it at
+  // weight 400), so asking for 700 on top of it invites a faked double-bold.
+  // Disabling synthesis lets a real bold face through untouched, while a system
+  // family still gets its genuine bold.
+  el.style.fontSynthesis = "none";
+  el.style.color = edit.textColor || "#111";
+  el.style.background = edit.bgColor || "#fff";
+  // Text on a rotated page reads across the page; turn the editable text to match.
+  if (edit.txt) {
+    edit.txt.style.transformOrigin = "0 0";
+    edit.txt.style.transform = rotated ? `rotate(${edit.angle}deg)` : "";
+  }
+  el.classList.toggle("removal", !edit.text.trim());
+}
+
+// ---------------------------------------------------------------------------
+// sampling the page so the preview matches what the server will produce
+// ---------------------------------------------------------------------------
+
+function sampleCanvas(page, box, mode, reference) {
+  const ctx = page.canvas.getContext("2d", { willReadFrequently: true });
+  const dpr = state.dpr;
+  const points = [];
+  const pad = 4;
+  const midY = (box.y0 + box.y1) / 2;
+  const midX = (box.x0 + box.x1) / 2;
+  if (mode === "bg") {
+    points.push([box.x0 - pad, midY], [box.x1 + pad, midY],
+                [midX, box.y0 - pad], [midX, box.y1 + pad], [box.x0 - pad, box.y0 - pad]);
+  } else {
+    for (let i = 1; i <= 8; i++) {
+      for (let j = 1; j <= 3; j++) {
+        points.push([box.x0 + ((box.x1 - box.x0) * i) / 9, box.y0 + ((box.y1 - box.y0) * j) / 4]);
+      }
+    }
+  }
+  const samples = [];
+  for (const [x, y] of points) {
+    const px = Math.round(x * dpr), py = Math.round(y * dpr);
+    if (px < 0 || py < 0 || px >= page.canvas.width || py >= page.canvas.height) continue;
+    try {
+      const d = ctx.getImageData(px, py, 1, 1).data;
+      if (d[3] < 8) continue;
+      samples.push([d[0], d[1], d[2]]);
+    } catch { /* unreadable pixel, skip */ }
+  }
+  if (!samples.length) return mode === "bg" ? [255, 255, 255] : [17, 17, 17];
+  if (mode === "bg") {
+    // An upper-percentile sample: stray ink from a neighbouring glyph or rule is
+    // darker than whatever the page is actually painted with.
+    return samples.slice().sort((a, b) => luminance(b) - luminance(a))[Math.floor(samples.length * 0.35)];
+  }
+  // Ink: whichever sample is furthest from the background. Taking the *darkest*
+  // pixel would return the panel itself for white-on-dark text, previewing the
+  // replacement invisibly.
+  const ref = reference || [255, 255, 255];
+  return samples.slice().sort((a, b) => distance(b, ref) - distance(a, ref))[0];
+}
+
+const luminance = ([r, g, b]) => 0.2126 * r + 0.7152 * g + 0.0722 * b;
+const distance = (a, b) => Math.hypot(a[0] - b[0], a[1] - b[1], a[2] - b[2]);
+const rgbCss = ([r, g, b]) => `rgb(${r}, ${g}, ${b})`;
+const rgbFromCss = (list) => `rgb(${list.map((v) => Math.round(v * 255)).join(", ")})`;
+
+/**
+ * The font stack the preview draws with.
+ *
+ * pdf.js registers every font it loaded in `document.fonts` under the text
+ * item's fontName, and that is the document's real embedded face -- so naming it
+ * first makes the preview match the page exactly. The backend's family stack is
+ * the fallback (same machine, so its installed fonts are usually the browser's
+ * too), and a generic family ends the list.
+ */
+function fontStack(edit) {
+  const parts = [];
+  if (edit.cssFont) parts.push(`"${edit.cssFont}"`);
+  if (edit.serverFamily) parts.push(edit.serverFamily);
+  const stack = parts.join(", ");
+  // The server's stack already ends in a generic family; don't repeat it.
+  if (!/(sans-serif|serif|monospace|cursive|fantasy|system-ui)\s*$/.test(stack)) {
+    parts.push(edit.genericFont || "sans-serif");
+  }
+  return parts.join(", ");
+}
+
+/** 700 for a bold run, 400 for one known to be regular, unset while unknown. */
+function weightCss(edit) {
+  if (edit.bold === true) return "700";
+  if (edit.bold === false) return "400";
+  return "";
+}
+
+/** Family, weight and slant as inline CSS, so every preview of an edit agrees. */
+function fontCss(edit) {
+  const parts = [`font-family:${fontStack(edit)}`];
+  if (weightCss(edit)) parts.push(`font-weight:${weightCss(edit)}`);
+  if (edit.italic) parts.push("font-style:italic");
+  return parts.join(";");
+}
+
+/** "bold"/"italic" tags, from what the server read out of the original run. */
+function weightTags(bold, italic) {
+  return [bold ? "bold" : "", italic ? "italic" : ""]
+    .filter(Boolean)
+    .map((label) => `<span class="fontpill">${label}</span>`)
+    .join("");
+}
+
+// ---------------------------------------------------------------------------
+// editing
+// ---------------------------------------------------------------------------
+
+function beginEditFromSpan(page, span) {
+  const rect = cssBoxToPdf(page, ...elementBoxInPage(page, span));
+  // Selecting a text run should also point the toolbar at the change it makes,
+  // which is what makes the typeface / size / colour controls apply to it.
+  const text = span.dataset.text;
+  const size = parseFloat(span.dataset.size) || 11;
+  const angle = parseFloat(span.dataset.angle) || 0;
+
+  // Reuse an existing change over the same spot rather than stacking another.
+  for (const existing of state.edits.values()) {
+    if (existing.page === page.index && overlaps(existing.rect, rect)) {
+      focusEdit(existing);
+      return existing;
+    }
+  }
+
+  const box = pdfBoxToCss(page, rect);
+  const sampledBg = sampleCanvas(page, box, "bg");
+  const sampledInk = sampleCanvas(page, box, "ink", sampledBg);
+  const edit = {
+    id: `e${++state.seq}`,
+    page: page.index,
+    rect,
+    original: text,
+    text,
+    displaySize: size,
+    displayFont: span.dataset.fontName || "",
+    cssFont: span.dataset.cssFont || "",
+    genericFont: span.dataset.genericFont || "sans-serif",
+    serverFamily: null,
+    // Weight and slant come from the server's reading of the run's own flags;
+    // until that lands the pdf.js face (when there is one) draws the right cut.
+    bold: null,
+    italic: null,
+    angle,
+    bgColor: rgbCss(sampledBg),
+    textColor: rgbCss(sampledInk),
+    resolve: null,
+    resolveState: "pending",
+    el: null,
+  };
+  createEditElement(edit);
+  state.edits.set(edit.id, edit);
+  selectObject(edit);
+  focusEdit(edit);
+  verifyWithServer(edit);
+  renderChangeList();
+  updateExportButton();
+  return edit;
+}
+
+function overlaps(a, b) {
+  return !(a[2] < b[0] || b[2] < a[0] || a[3] < b[1] || b[3] < a[1]);
+}
+
+function createEditElement(edit) {
+  const page = state.pages[edit.page];
+  const el = document.createElement("div");
+  el.className = "edit";
+  // Only the inner span is editable: the box also holds the discard button, and
+  // reading textContent off the box would swallow that button's label.
+  const txt = document.createElement("span");
+  txt.className = "txt";
+  txt.spellcheck = false;
+  // Announce it as an editable field, not as passive page text.
+  txt.setAttribute("role", "textbox");
+  txt.setAttribute("aria-label", `Replacement text for "${edit.original}" on page ${edit.page + 1}`);
+  txt.textContent = edit.text;
+  if (supportsPlainText()) txt.setAttribute("contenteditable", "plaintext-only");
+  else txt.setAttribute("contenteditable", "true");
+
+  const kill = document.createElement("div");
+  kill.className = "kill";
+  kill.textContent = "×";
+  kill.title = "Discard this change";
+  kill.addEventListener("mousedown", (ev) => { ev.preventDefault(); ev.stopPropagation(); removeEdit(edit.id); });
+
+  txt.addEventListener("keydown", (ev) => onEditKey(ev, edit));
+  txt.addEventListener("paste", onPaste);
+  // Keep the sidebar in step with the box while it is being typed in, rather
+  // than leaving a stale row next to a live editor. Debounced: rebuilding the
+  // list on every keystroke is churn nobody asked for.
+  const refreshList = debounce(renderChangeList, 120);
+  txt.addEventListener("input", () => { edit.text = readEditText(edit); refreshList(); });
+  txt.addEventListener("blur", () => commitEdit(edit));
+  el.addEventListener("mousedown", (ev) => { if (ev.target !== kill) ev.stopPropagation(); });
+
+  el.append(txt, kill);
+  edit.el = el;
+  edit.txt = txt;
+  page.overlay.append(el);
+  positionEdit(edit);
+}
+
+const readEditText = (edit) =>
+  (edit.txt.textContent || "").replace(/\u00a0/g, " ");
+
+function supportsPlainText() {
+  if (supportsPlainText.cached !== undefined) return supportsPlainText.cached;
+  try {
+    const probe = document.createElement("div");
+    probe.setAttribute("contenteditable", "plaintext-only");
+    supportsPlainText.cached = probe.contentEditable === "plaintext-only";
+  } catch { supportsPlainText.cached = false; }
+  return supportsPlainText.cached;
+}
+
+function onPaste(ev) {
+  ev.preventDefault();
+  const text = (ev.clipboardData || window.clipboardData).getData("text").replace(/\s*\n\s*/g, " ");
+  document.execCommand("insertText", false, text);
+}
+
+function focusEdit(edit) {
+  state.activeId = edit.id;
+  edit.el.classList.add("editing");
+  edit.txt.focus();
+  selectAll(edit.txt);
+  edit.el.scrollIntoView({ block: "nearest", inline: "nearest" });
+}
+
+function selectAll(el) {
+  const range = document.createRange();
+  range.selectNodeContents(el);
+  const sel = window.getSelection();
+  sel.removeAllRanges();
+  sel.addRange(range);
+}
+
+function onEditKey(ev, edit) {
+  if (ev.key === "Enter") {
+    ev.preventDefault();
+    commitEdit(edit);
+    edit.txt.blur();
+  } else if (ev.key === "Escape") {
+    ev.preventDefault();
+    if (edit.original.trim() === readEditText(edit).trim()) {
+      removeEdit(edit.id);
+    } else {
+      edit.text = edit.original;
+      edit.txt.textContent = edit.text;
+      commitEdit(edit);
+    }
+    edit.txt.blur();
+  }
+}
+
+function commitEdit(edit) {
+  if (!state.edits.has(edit.id)) return;
+  edit.text = readEditText(edit).replace(/\s+$/, "");
+  if (edit.text.trim() === edit.original.trim()) {
+    // Nothing actually changed: drop it rather than shipping a no-op edit.
+    removeEdit(edit.id);
+    return;
+  }
+  // Don't leave the editing affordance to the blur handler alone: committing
+  // is what ends an edit, whether the user pressed Enter or clicked away.
+  edit.el?.classList.remove("editing");
+  if (state.activeId === edit.id) state.activeId = null;
+  positionEdit(edit);
+  renderChangeList();
+  updateExportButton();
+}
+
+function removeEdit(id) {
+  const edit = state.edits.get(id);
+  if (!edit) return;
+  // Drop it from the map before touching the DOM: detaching the focused element
+  // fires blur synchronously, which re-enters commitEdit/removeEdit for this id.
+  state.edits.delete(id);
+  if (edit.el?.parentNode) edit.el.remove();
+  if (state.activeId === id) state.activeId = null;
+  renderChangeList();
+  updateExportButton();
+}
+
+function removeAllEdits() {
+  for (const id of [...state.edits.keys()]) removeEdit(id);
+}
+
+async function verifyWithServer(edit) {
+  try {
+    const res = await fetch(`/api/documents/${state.meta.id}/resolve`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ page: edit.page, rect: edit.rect }),
+    });
+    if (!res.ok) throw new Error(`resolve failed (${res.status})`);
+    const data = await res.json();
+    edit.resolve = data;
+    // Adopt the server's own family stack and colour: those are exactly what the
+    // export will use, so the preview stops guessing.
+    const defaults = data.defaults || {};
+    if (defaults.css_family) edit.serverFamily = defaults.css_family;
+    if (Array.isArray(defaults.color) && defaults.color.length === 3) {
+      edit.textColor = rgbFromCss(defaults.color);
+    }
+    if (typeof defaults.bold === "boolean") edit.bold = defaults.bold;
+    if (typeof defaults.italic === "boolean") edit.italic = defaults.italic;
+    edit.serverDefaults = defaults;
+    positionEdit(edit);
+    if (state.selected === edit) syncToolbar();
+    const domText = edit.original.replace(/\s+/g, " ").trim();
+    const serverText = (data.text || "").replace(/\s+/g, " ").trim();
+    if (!data.found) edit.resolveState = "missing";
+    else if (serverText === domText || serverText.includes(domText) || domText.includes(serverText)) edit.resolveState = "match";
+    else edit.resolveState = "mismatch";
+  } catch (err) {
+    edit.resolveState = "error";
+    edit.resolve = { error: String(err) };
+  }
+  refreshResolveIndicators();
+}
+
+function refreshResolveIndicators() {
+  for (const edit of state.edits.values()) {
+    if (!edit.el) continue;
+    const bad = edit.resolveState === "missing" || edit.resolveState === "mismatch";
+    edit.el.classList.toggle("flagged", bad);
+    edit.el.title = bad
+      ? (edit.resolveState === "missing"
+        ? "The server found no text at these coordinates — nothing will be removed."
+        : `The server reads this spot as: ${JSON.stringify(edit.resolve?.text)}`)
+      : "";
+  }
+  renderChangeList();
+}
+
+// ---------------------------------------------------------------------------
+// markups
+//
+// A markup is geometry, not text: the browser draws it so the user can see what
+// they are doing, and the server redraws it from the same coordinates on export.
+// Both sides work in PDF points, unrotated page space, so a stroke lands where
+// it was drawn at any page rotation and at any zoom.
+// ---------------------------------------------------------------------------
+
+// The 12 base-14 faces, reachable from a family plus weight and slant.
+const FONT_CODES = {
+  sans:  { plain: "helv", bold: "hebo", italic: "heit", both: "hebi" },
+  serif: { plain: "tiro", bold: "tibo", italic: "tiit", both: "tibi" },
+  mono:  { plain: "cour", bold: "cobo", italic: "coit", both: "cobi" },
+};
+
+const PALETTE = ["#1d2129", "#6b7488", "#d92b2b", "#e8790c", "#f0c000",
+                 "#2fa36b", "#2563eb", "#7c3aed", "#ffffff"];
+
+const TOOL_KEYS = { v: "select", t: "text", i: "image", p: "pen", h: "highlight",
+                    a: "arrow", r: "rect", e: "ellipse", o: "ellipse" };
+// Dragged as a box, rather than drawn as a freehand path.
+const BOX_TOOLS = new Set(["highlight", "rect", "ellipse", "arrow", "text", "image"]);
+// Tools that hand the pointer back once they have drawn one thing. The pen and
+// the highlighter stay active, because drawing several strokes in a row is the
+// normal way to use them.
+const ONE_SHOT_TOOLS = new Set(["text", "image", "arrow", "rect", "ellipse"]);
+const VECTOR_KINDS = new Set(["ink", "line", "arrow"]);
+const FILLABLE_KINDS = new Set(["rect", "ellipse"]);
+const NO_WIDTH_KINDS = new Set(["text", "image", "highlight"]);
+const PAD = 6;                       // px of clickable halo around a thin stroke
+const MIN_DRAG = 3;                  // px below which a drag is treated as a click
+
+const TOOL_HINT = {
+  select: "Click any text to edit it, or a markup to move and change it.",
+  text: "Click a page to place a text box.",
+  image: "Drag on the page to place the image.",
+  pen: "Drag to draw — the pen stays active for the next stroke.",
+  highlight: "Drag across text — the highlighter stays active.",
+  arrow: "Drag from the tail to the tip.",
+  rect: "Drag to draw a rectangle.",
+  ellipse: "Drag to draw an ellipse.",
+};
+
+// Per-tool memory, so the pen, the highlighter and a shape do not have to share
+// one colour.
+const TOOL_STYLE = {
+  pen:       { color: "#1d2129", width: 2.5, opacity: 1, fill: false },
+  highlight: { color: "#f0c000", width: 0, opacity: 0.35, fill: false },
+  arrow:     { color: "#d92b2b", width: 2.5, opacity: 1, fill: false },
+  rect:      { color: "#2563eb", width: 2, opacity: 1, fill: false },
+  ellipse:   { color: "#2563eb", width: 2, opacity: 1, fill: false },
+  text:      { color: "#1d2129", width: 1, opacity: 1, fill: false, size: 12 },
+};
+const BASE_STYLE = { color: "#1d2129", width: 2.5, opacity: 1, fill: false,
+                     size: 12, family: "", bold: false, italic: false, align: 0 };
+
+function styleFor(tool) {
+  if (!state.toolStyle[tool]) {
+    state.toolStyle[tool] = { ...BASE_STYLE, ...(TOOL_STYLE[tool] || {}) };
+  }
+  return state.toolStyle[tool];
+}
+
+const show = (id, on) => $(id).classList.toggle("hidden", !on);
+
+function setTool(tool) {
+  state.tool = tool;
+  state.style = styleFor(tool);
+  if (tool !== "image") state.pendingImage = null;
+  if (tool !== "select") clearSelection(false);
+  for (const btn of $("toolButtons").querySelectorAll(".tbtn")) {
+    btn.setAttribute("aria-pressed", String(btn.dataset.tool === tool));
+  }
+  for (const page of state.pages) page.pageEl.classList.toggle("draw-hit", tool !== "select");
+  syncToolbar();
+  if (state.pdf) setStatus(TOOL_HINT[tool] || "");
+}
+
+/** Finish whatever text box the user was typing in, wherever they went next. */
+function commitActiveTextEdit() {
+  const typing = state.activeId ? state.edits.get(state.activeId) : null;
+  if (typing) commitEdit(typing);
+}
+
+function clearSelection(render = true) {
+  commitActiveTextEdit();
+  state.selected?.el?.classList.remove("selected");
+  state.selected = null;
+  if (render) { syncToolbar(); renderChangeList(); }
+}
+
+/** The markup or text edit the toolbar is pointed at, if any. */
+function selectObject(obj) {
+  // Drawing a markup calls preventDefault(), so the text box the user was typing
+  // in keeps focus and its editing outline. Commit it rather than leave a box
+  // looking active while something else is selected.
+  if (state.activeId && state.edits.get(state.activeId) !== obj) commitActiveTextEdit();
+  if (state.selected && state.selected !== obj) state.selected.el?.classList.remove("selected");
+  state.selected = obj;
+  obj?.el?.classList.add("selected");
+  state.activeId = obj && state.edits.has(obj.id) ? obj.id : null;
+  syncToolbar();
+  renderChangeList();
+}
+
+/** Which set of controls the toolbar should show: the selection, else the tool. */
+function activeKind() {
+  const sel = state.selected;
+  if (!sel) return state.tool;
+  return state.annotations.has(sel.id) ? sel.kind : "text";
+}
+
+function syncToolbar() {
+  const sel = state.selected;
+  const isMarkup = !!sel && state.annotations.has(sel.id);
+  const isTextEdit = !!sel && state.edits.has(sel.id);
+  const drawing = state.tool !== "select";
+  const kind = activeKind();
+  const textish = kind === "text";
+  const strokeish = VECTOR_KINDS.has(kind) || FILLABLE_KINDS.has(kind);
+
+  show("optStroke", (drawing || isTextEdit || isMarkup) && kind !== "image");
+  show("optWidth", strokeish);
+  show("optOpacity", strokeish || kind === "highlight");
+  show("optFill", FILLABLE_KINDS.has(kind));
+  show("optFont", textish && (drawing || isMarkup || isTextEdit));
+  show("optImage", kind === "image");
+  show("optObject", !!sel);
+  show("resetStyleBtn", isTextEdit);
+
+  // Values come from the selection when there is one, otherwise from the tool's
+  // remembered style — so picking a colour with nothing selected sets the brush.
+  const color = isMarkup ? sel.color
+    : isTextEdit ? (sel.colorOverride || cssToHex(sel.textColor) || "#1d2129")
+    : state.style.color;
+  $("inkColor").value = color;
+  paintSwatchSelection(color);
+
+  const width = isMarkup ? sel.width : state.style.width;
+  $("inkWidth").value = String(width);
+  $("inkWidthVal").textContent = `${+width}`;
+
+  const opacity = isMarkup ? sel.opacity : state.style.opacity;
+  $("inkOpacity").value = String(opacity);
+  $("inkOpacityVal").textContent = `${Math.round(opacity * 100)}%`;
+
+  const fill = isMarkup ? !!sel.fill : state.style.fill;
+  $("fillBtn").setAttribute("aria-pressed", String(fill));
+
+  const family = isMarkup ? (sel.family || "") : isTextEdit ? (sel.familyOverride || "") : state.style.family;
+  const size = isMarkup ? sel.size : isTextEdit ? (sel.sizeOverride || sel.displaySize || 12) : state.style.size;
+  const bold = isMarkup ? !!sel.bold : isTextEdit ? sel.bold === true : state.style.bold;
+  const italic = isMarkup ? !!sel.italic : isTextEdit ? sel.italic === true : state.style.italic;
+  const align = isMarkup ? (sel.align || 0) : isTextEdit ? (sel.alignOverride || 0) : state.style.align;
+  $("fontFamily").value = family;
+  $("fontSize").value = String(Math.round(size * 10) / 10);
+  $("boldBtn").setAttribute("aria-pressed", String(bold));
+  $("italicBtn").setAttribute("aria-pressed", String(italic));
+  for (const [id, value] of [["alignLeft", 0], ["alignCenter", 1], ["alignRight", 2]]) {
+    $(id).setAttribute("aria-pressed", String(align === value));
+  }
+}
+
+function paintSwatchSelection(color) {
+  const wanted = (color || "").toLowerCase();
+  for (const btn of $("inkSwatches").children) {
+    btn.setAttribute("aria-pressed", String(btn.dataset.color.toLowerCase() === wanted));
+  }
+}
+
+/**
+ * Push one toolbar edit to whatever the controls are pointed at.
+ *
+ * A selected object is edited; with nothing selected the value becomes the
+ * brush the next markup is drawn with.
+ */
+function applyStyleChange(name, value) {
+  const sel = state.selected;
+  if (sel && state.annotations.has(sel.id)) {
+    const ann = sel;
+    if (name === "family") ann.family = value;
+    else ann[name] = value;
+    positionAnnotation(ann);
+  } else if (sel && state.edits.has(sel.id)) {
+    const edit = sel;
+    if (name === "color") { edit.colorOverride = value; edit.textColor = value; }
+    else if (name === "size") edit.sizeOverride = value;
+    else if (name === "family") edit.familyOverride = value;
+    else if (name === "align") edit.alignOverride = value;
+    else edit[name] = value;
+    positionEdit(edit);
+    renderChangeList();
+  }
+  state.style[name] = value;
+  syncToolbar();
+}
+
+function resetSelectedStyle() {
+  const edit = state.selected;
+  if (!edit || !state.edits.has(edit.id)) return;
+  edit.colorOverride = null;
+  edit.sizeOverride = null;
+  edit.familyOverride = "";
+  edit.alignOverride = 0;
+  const defaults = (edit.resolve?.defaults) || {};
+  edit.textColor = Array.isArray(defaults.color) ? rgbFromCss(defaults.color) : edit.textColor;
+  if (typeof defaults.bold === "boolean") edit.bold = defaults.bold;
+  if (typeof defaults.italic === "boolean") edit.italic = defaults.italic;
+  positionEdit(edit);
+  renderChangeList();
+  syncToolbar();
+  setStatus("Back to the document's own styling for this change.", "ok");
+}
+
+function deleteSelectedObject() {
+  const sel = state.selected;
+  if (!sel) return;
+  if (state.annotations.has(sel.id)) removeAnnotation(sel.id);
+  else removeEdit(sel.id);
+}
+
+const SVG_NS = "http://www.w3.org/2000/svg";
+const ANNOT_NAME = {
+  text: "Text box", image: "Image", ink: "Freehand", line: "Line", arrow: "Arrow",
+  rect: "Rectangle", ellipse: "Ellipse", highlight: "Highlight",
+};
+
+// ---- colour ----------------------------------------------------------------
+
+function hexToFloats(hex) {
+  const match = /^#?([0-9a-f]{6})$/i.exec(String(hex || "").trim());
+  if (!match) return [0, 0, 0];
+  const n = parseInt(match[1], 16);
+  return [((n >> 16) & 255) / 255, ((n >> 8) & 255) / 255, (n & 255) / 255]
+    .map((v) => +v.toFixed(4));
+}
+
+function withAlpha(hex, alpha) {
+  const [r, g, b] = hexToFloats(hex).map((v) => Math.round(v * 255));
+  return `rgba(${r}, ${g}, ${b}, ${alpha})`;
+}
+
+/** Any CSS colour the browser accepts, back to #rrggbb (for the colour input). */
+function cssToHex(value) {
+  const text = String(value || "").trim();
+  if (/^#[0-9a-f]{6}$/i.test(text)) return text.toLowerCase();
+  const match = /rgba?\(\s*(\d+)[,\s]+(\d+)[,\s]+(\d+)/i.exec(text);
+  if (!match) return "";
+  return "#" + [match[1], match[2], match[3]]
+    .map((v) => Math.min(255, +v).toString(16).padStart(2, "0")).join("");
+}
+
+function requestedFamilyStack(family) {
+  if (family === "serif") return "Georgia, 'Times New Roman', serif";
+  if (family === "mono") return "'Courier New', Courier, monospace";
+  if (family === "sans") return "Helvetica, Arial, sans-serif";
+  return "";
+}
+
+function base14Code(family, bold, italic) {
+  const set = FONT_CODES[family];
+  if (!set) return null;
+  if (bold && italic) return set.both;
+  return bold ? set.bold : italic ? set.italic : set.plain;
+}
+
+// ---- geometry --------------------------------------------------------------
+
+function annotationBox(ann) {
+  if (ann.rect) return ann.rect;
+  const xs = ann.points.map((p) => p[0]);
+  const ys = ann.points.map((p) => p[1]);
+  return [Math.min(...xs), Math.min(...ys), Math.max(...xs), Math.max(...ys)];
+}
+
+/**
+ * The filled head at the tip, in PDF points.
+ *
+ * Computed here in the server's units and converted for display, so the preview
+ * and the exported arrow cannot drift apart.
+ */
+function arrowHead(a, b, width) {
+  const length = Math.hypot(b[0] - a[0], b[1] - a[1]);
+  if (length < 1) return [];
+  const head = Math.min(Math.max(width * 4, 7), Math.max(length * 0.6, 7));
+  const angle = Math.atan2(b[1] - a[1], b[0] - a[0]);
+  const spread = (24 * Math.PI) / 180;
+  return [b,
+    [b[0] - head * Math.cos(angle - spread), b[1] - head * Math.sin(angle - spread)],
+    [b[0] - head * Math.cos(angle + spread), b[1] - head * Math.sin(angle + spread)]];
+}
+
+const svgPath = (points) => points
+  .map(([x, y], i) => `${i ? "L" : "M"}${x.toFixed(2)} ${y.toFixed(2)}`).join(" ");
+
+// ---- elements --------------------------------------------------------------
+
+function addAnnotation(part) {
+  const style = styleFor(part.tool || part.kind);
+  const ann = {
+    id: `a${++state.seq}`,
+    kind: part.kind,
+    page: part.page,
+    rect: part.rect || null,
+    points: part.points || [],
+    color: part.color ?? style.color,
+    width: part.width ?? style.width,
+    opacity: part.opacity ?? style.opacity,
+    fill: part.fill ?? style.fill,
+    size: part.size ?? style.size ?? 12,
+    family: part.family ?? style.family ?? "",
+    bold: part.bold ?? style.bold ?? false,
+    italic: part.italic ?? style.italic ?? false,
+    align: part.align ?? style.align ?? 0,
+    text: part.text || "",
+    image: part.image || null,
+    matchStack: "",
+    editing: false,
+    el: null,
+  };
+  state.annotations.set(ann.id, ann);
+  buildAnnotationElement(ann);
+  return ann;
+}
+
+function buildAnnotationElement(ann) {
+  const page = state.pages[ann.page];
+  const el = document.createElement("div");
+  el.className = `annot annot-${ann.kind}`;
+  el.dataset.id = ann.id;
+  el.title = `${ANNOT_NAME[ann.kind] || "Markup"} — drag to move`;
+
+  if (ann.kind === "text") {
+    const txt = document.createElement("div");
+    txt.className = "annot-text";
+    txt.textContent = ann.text;
+    el.append(txt);
+    ann.txt = txt;
+  } else if (ann.kind === "image") {
+    const img = document.createElement("img");
+    img.src = ann.image.dataUrl;
+    img.alt = "";
+    img.draggable = false;
+    el.append(img);
+  } else if (VECTOR_KINDS.has(ann.kind)) {
+    const svg = document.createElementNS(SVG_NS, "svg");
+    svg.setAttribute("aria-hidden", "true");
+    svg.style.position = "absolute";
+    // Halos first, so the real artwork paints over them.
+    ann.halo = appendHalo(svg, true);
+    if (ann.kind === "arrow") ann.headHalo = appendHalo(svg, false);
+    const path = document.createElementNS(SVG_NS, "path");
+    path.setAttribute("fill", "none");
+    path.setAttribute("stroke-linecap", "round");
+    path.setAttribute("stroke-linejoin", "round");
+    svg.append(path);
+    ann.path = path;
+    if (ann.kind === "arrow") {
+      const head = document.createElementNS(SVG_NS, "path");
+      head.setAttribute("stroke", "none");
+      svg.append(head);
+      ann.head = head;
+    }
+    el.append(svg);
+    ann.svg = svg;
+  }
+
+  if (!VECTOR_KINDS.has(ann.kind)) {
+    const ring = document.createElement("div");
+    ring.className = "ring";
+    el.append(ring);
+  }
+
+  const kill = document.createElement("div");
+  kill.className = "kill";
+  kill.textContent = "×";
+  kill.title = "Delete this markup";
+  kill.addEventListener("mousedown", (ev) => {
+    ev.preventDefault();
+    ev.stopPropagation();
+    removeAnnotation(ann.id);
+  });
+  const handle = document.createElement("div");
+  handle.className = "handle";
+  handle.title = "Resize";
+  el.append(kill, handle);
+  ann.kill = kill;
+  ann.handle = handle;
+
+  el.addEventListener("pointerdown", (ev) => onObjectPointerDown(ev, ann));
+  el.addEventListener("dblclick", (ev) => {
+    ev.preventDefault();
+    if (ann.kind === "text") beginTextEdit(ann);
+  });
+  page.annot.append(el);
+  ann.el = el;
+  if (ann.kind === "text") ann.matchStack = nearestTextStack(ann);
+  positionAnnotation(ann);
+  return ann;
+}
+
+/**
+ * The font stack a new text box should preview in when set to match the document.
+ *
+ * The server resolves this properly at export time; here the nearest run on the
+ * page is a good enough stand-in, and it beats defaulting to a generic sans for
+ * a document set in Times.
+ */
+function nearestTextStack(ann) {
+  const page = state.pages[ann.page];
+  if (!page) return "sans-serif";
+  const box = annotationBox(ann);
+  const cx = (box[0] + box[2]) / 2;
+  const cy = (box[1] + box[3]) / 2;
+  let best = null;
+  let bestDistance = Infinity;
+  for (const span of page.layer.children) {
+    const rect = cssBoxToPdf(page, ...elementBoxInPage(page, span));
+    const distance = Math.hypot((rect[0] + rect[2]) / 2 - cx, (rect[1] + rect[3]) / 2 - cy);
+    if (distance < bestDistance) { bestDistance = distance; best = span; }
+  }
+  if (!best) return "sans-serif";
+  const parts = [];
+  if (best.dataset.cssFont) parts.push(`"${best.dataset.cssFont}"`);
+  parts.push(best.dataset.genericFont || "sans-serif");
+  return parts.join(", ");
+}
+
+/** A shadow copy of a stroke, shown only while the markup is selected. */
+function appendHalo(svg, round) {
+  const halo = document.createElementNS(SVG_NS, "path");
+  halo.setAttribute("class", "halo");
+  halo.setAttribute("fill", "none");
+  if (round) halo.setAttribute("stroke-linecap", "round");
+  halo.setAttribute("stroke-linejoin", "round");
+  halo.setAttribute("stroke", "rgba(63, 140, 255, 0.45)");
+  svg.append(halo);
+  return halo;
+}
+
+function positionAnnotation(ann) {
+  const page = state.pages[ann.page];
+  const el = ann.el;
+  if (!page || !el) return;
+  const box = pdfBoxToCss(page, annotationBox(ann));
+  const width = Math.max(box.x1 - box.x0, 1);
+  const height = Math.max(box.y1 - box.y0, 1);
+  // A thin pen stroke needs a clickable halo around it, but the artwork itself
+  // has to stay on the true box or the preview would sit off the export.
+  const pad = VECTOR_KINDS.has(ann.kind) ? PAD : 0;
+  el.style.left = `${box.x0 - pad}px`;
+  el.style.top = `${box.y0 - pad}px`;
+  el.style.width = `${width + pad * 2}px`;
+  el.style.height = `${height + pad * 2}px`;
+
+  if (ann.kind === "highlight") {
+    el.style.background = withAlpha(ann.color, ann.opacity);
+  } else if (FILLABLE_KINDS.has(ann.kind)) {
+    el.style.background = ann.fill ? withAlpha(ann.color, 0.18) : "transparent";
+    el.style.border = ann.width > 0
+      ? `${Math.max(ann.width * state.scale, 1)}px solid ${withAlpha(ann.color, ann.opacity)}`
+      : "none";
+  } else if (ann.kind === "text") {
+    const txt = ann.txt;
+    const stack = requestedFamilyStack(ann.family) || ann.matchStack || "sans-serif";
+    txt.style.fontFamily = stack;
+    txt.style.fontSize = `${ann.size * state.scale}px`;
+    txt.style.lineHeight = "1.32";
+    txt.style.fontWeight = ann.bold ? "700" : "400";
+    txt.style.fontStyle = ann.italic ? "italic" : "";
+    txt.style.color = ann.color;
+    txt.style.textAlign = ["left", "center", "right"][ann.align] || "left";
+  } else if (VECTOR_KINDS.has(ann.kind)) {
+    drawVectorArt(ann, width, height);
+  }
+}
+
+function drawVectorArt(ann, width, height) {
+  const page = state.pages[ann.page];
+  const view = pdfBoxToCss(page, annotationBox(ann));
+  const localize = (point) => {
+    const [x, y] = pdfPointToView(page, point);
+    return [x - view.x0, y - view.y0];
+  };
+  ann.svg.setAttribute("width", String(width));
+  ann.svg.setAttribute("height", String(height));
+  ann.svg.setAttribute("viewBox", `0 0 ${width} ${height}`);
+  ann.svg.style.width = `${width}px`;
+  ann.svg.style.height = `${height}px`;
+  ann.svg.style.left = `${PAD}px`;
+  ann.svg.style.top = `${PAD}px`;
+  const stroke = withAlpha(ann.color, ann.opacity);
+  const pathData = svgPath(ann.points.map(localize));
+  const strokeWidth = Math.max(ann.width * state.scale, 0.6);
+  ann.path.setAttribute("d", pathData);
+  ann.path.setAttribute("stroke", stroke);
+  ann.path.setAttribute("stroke-width", String(strokeWidth));
+  // The halo is the same geometry, fatter and translucent. A stroke needs roughly
+  // 7pt of extra width to read as a highlight around a hairline.
+  ann.halo.setAttribute("d", pathData);
+  ann.halo.setAttribute("stroke-width", String(strokeWidth + 7));
+  if (ann.head) {
+    const tip = ann.points[ann.points.length - 1];
+    const head = arrowHead(ann.points[0], tip, ann.width).map(localize);
+    const headData = head.length ? `${svgPath(head)} Z` : "";
+    ann.head.setAttribute("d", headData);
+    ann.head.setAttribute("fill", stroke);
+    ann.headHalo.setAttribute("d", headData);
+    ann.headHalo.setAttribute("stroke-width", "7");
+  }
+}
+
+function removeAnnotation(id) {
+  const ann = state.annotations.get(id);
+  if (!ann) return;
+  state.annotations.delete(id);
+  ann.el?.remove();
+  if (state.selected === ann) { state.selected = null; syncToolbar(); }
+  renderChangeList();
+  updateExportButton();
+}
+
+function removeAllMarkups() {
+  for (const id of [...state.annotations.keys()]) removeAnnotation(id);
+}
+
+function clearAll() {
+  removeAllMarkups();
+  removeAllEdits();
+  clearSelection();
+  updateExportButton();
+  setStatus("Cleared every change and markup.", "ok");
+}
+
+function fillOpacityFor(ann) {
+  if (ann.kind === "highlight") return ann.opacity;
+  if (FILLABLE_KINDS.has(ann.kind)) return ann.fill ? 0.18 : 0;
+  return 0;
+}
+
+function annotationPayload(ann) {
+  const r3 = (v) => +(+v).toFixed(3);
+  return {
+    kind: ann.kind,
+    page: ann.page,
+    rect: ann.rect ? ann.rect.map(r3) : null,
+    points: ann.points.map((p) => [r3(p[0]), r3(p[1])]),
+    text: ann.kind === "text" ? ann.text : "",
+    color: hexToFloats(ann.color),
+    width: r3(ann.width),
+    opacity: r3(ann.opacity),
+    fill_opacity: r3(fillOpacityFor(ann)),
+    size: ann.kind === "text" ? +ann.size.toFixed(2) : null,
+    font: ann.kind === "text" ? base14Code(ann.family, ann.bold, ann.italic) : null,
+    align: ann.align || 0,
+    bold: !!ann.bold,
+    italic: !!ann.italic,
+    image: ann.image
+      ? { data: String(ann.image.dataUrl).split(",")[1] || "", mime: ann.image.mime }
+      : null,
+  };
+}
+
+// ---- text boxes ------------------------------------------------------------
+
+/**
+ * Read a contenteditable's text, turning block boundaries and <br> back into
+ * newlines. `textContent` alone would silently glue pressed-Enter lines together.
+ */
+function readEditableText(el) {
+  let out = "";
+  for (const node of el.childNodes) {
+    if (node.nodeType === Node.TEXT_NODE) { out += node.textContent; continue; }
+    if (node.nodeType !== Node.ELEMENT_NODE) continue;
+    if (node.tagName === "BR") { out += "\n"; continue; }
+    if (/^(DIV|P|LI|BLOCKQUOTE|H[1-6])$/.test(node.tagName) && out && !out.endsWith("\n")) out += "\n";
+    out += readEditableText(node);
+  }
+  return out;
+}
+
+const refreshListSoon = debounce(renderChangeList, 120);
+
+function beginTextEdit(ann) {
+  if (ann.editing) return;
+  ann.editing = true;
+  ann.el.classList.add("editing");
+  ann.txt.setAttribute("contenteditable", supportsPlainText() ? "plaintext-only" : "true");
+  ann.txt.setAttribute("role", "textbox");
+  ann.txt.setAttribute("aria-label", "Text box content");
+  ann.txt.spellcheck = false;
+  ann.txt.addEventListener("keydown", onTextAnnotationKey);
+  ann.txt.addEventListener("blur", () => commitTextAnnotation(ann));
+  // Keep the model in step with the box while it is being typed in: exporting
+  // mid-edit must send what is on screen, not the empty value the box started
+  // with. (The text-edit boxes are only read on commit because a stale value
+  // there can still be recovered; a markup's cannot.)
+  ann.txt.addEventListener("input", () => {
+    ann.text = readEditableText(ann.txt);
+    refreshListSoon();
+  });
+  ann.txt.focus();
+  selectAll(ann.txt);
+}
+
+function onTextAnnotationKey(ev) {
+  if (ev.key !== "Escape") return;
+  ev.preventDefault();
+  ev.stopPropagation();
+  ev.target.blur();
+}
+
+function commitTextAnnotation(ann) {
+  if (!ann.editing) return;
+  ann.editing = false;
+  ann.el.classList.remove("editing");
+  ann.txt.removeAttribute("contenteditable");
+  ann.txt.removeAttribute("role");
+  ann.text = readEditableText(ann.txt).replace(/\u00a0/g, " ").replace(/\s+$/, "");
+  if (!ann.text.trim()) { removeAnnotation(ann.id); return; }
+  renderChangeList();
+}
+
+// ---- pointer gestures ------------------------------------------------------
+
+function pageOf(target) {
+  const el = target?.closest?.(".page");
+  if (!el) return null;
+  return state.pages.find((p) => p.pageEl === el) || null;
+}
+
+function localPoint(page, ev) {
+  const rect = page.pageEl.getBoundingClientRect();
+  return [ev.clientX - rect.left, ev.clientY - rect.top];
+}
+
+function makeBoxPreview(page, kind) {
+  const el = document.createElement("div");
+  el.className = `annot annot-preview annot-${kind}`;
+  el.style.left = "0px";
+  el.style.top = "0px";
+  page.annot.append(el);
+  return el;
+}
+
+/** Freehand preview: one page-sized SVG drawn in display coordinates. */
+function makeInkPreview(page) {
+  const svg = document.createElementNS(SVG_NS, "svg");
+  svg.setAttribute("width", String(page.viewport.width));
+  svg.setAttribute("height", String(page.viewport.height));
+  svg.setAttribute("aria-hidden", "true");
+  svg.style.cssText = "position:absolute;left:0;top:0;pointer-events:none;overflow:visible";
+  const path = document.createElementNS(SVG_NS, "path");
+  path.setAttribute("fill", "none");
+  path.setAttribute("stroke-linecap", "round");
+  path.setAttribute("stroke-linejoin", "round");
+  svg.append(path);
+  page.annot.append(svg);
+  return svg;
+}
+
+function updateDrawPreview(gesture) {
+  const style = state.style;
+  if (gesture.tool === "pen") {
+    const path = gesture.preview.querySelector("path");
+    path.setAttribute("d", gesture.points
+      .map(([x, y], i) => `${i ? "L" : "M"}${x.toFixed(1)} ${y.toFixed(1)}`).join(" "));
+    path.setAttribute("stroke", withAlpha(style.color, style.opacity));
+    path.setAttribute("stroke-width", String(Math.max(style.width * state.scale, 1)));
+    return;
+  }
+  if (!gesture.preview) return;
+  const x0 = Math.min(gesture.start[0], gesture.last[0]);
+  const y0 = Math.min(gesture.start[1], gesture.last[1]);
+  const x1 = Math.max(gesture.start[0], gesture.last[0]);
+  const y1 = Math.max(gesture.start[1], gesture.last[1]);
+  gesture.preview.style.left = `${x0}px`;
+  gesture.preview.style.top = `${y0}px`;
+  gesture.preview.style.width = `${x1 - x0}px`;
+  gesture.preview.style.height = `${y1 - y0}px`;
+}
+
+function startDraw(ev, page) {
+  const start = localPoint(page, ev);
+  const gesture = {
+    mode: "draw", page, tool: state.tool, start, last: start, moved: false,
+    points: [start], preview: null,
+  };
+  if (state.tool === "pen") gesture.preview = makeInkPreview(page);
+  else if (BOX_TOOLS.has(state.tool)) gesture.preview = makeBoxPreview(page, state.tool);
+  state.gesture = gesture;
+  window.addEventListener("pointermove", onDrawMove);
+  window.addEventListener("pointerup", onDrawUp);
+  updateDrawPreview(gesture);
+}
+
+function onDrawMove(ev) {
+  const gesture = state.gesture;
+  if (!gesture || gesture.mode !== "draw") return;
+  const point = localPoint(gesture.page, ev);
+  if (Math.abs(point[0] - gesture.start[0]) > MIN_DRAG
+      || Math.abs(point[1] - gesture.start[1]) > MIN_DRAG) gesture.moved = true;
+  gesture.last = point;
+  if (gesture.tool === "pen") {
+    const previous = gesture.points[gesture.points.length - 1];
+    if (Math.hypot(point[0] - previous[0], point[1] - previous[1]) > 1.2) {
+      gesture.points.push(point);
+      updateDrawPreview(gesture);
+    }
+    return;
+  }
+  updateDrawPreview(gesture);
+}
+
+function onDrawUp() {
+  const gesture = state.gesture;
+  state.gesture = null;
+  window.removeEventListener("pointermove", onDrawMove);
+  window.removeEventListener("pointerup", onDrawUp);
+  if (!gesture || gesture.mode !== "draw") return;
+  gesture.preview?.remove();
+  gesture.preview = null;
+  if (gesture.tool === "pen") finishInk(gesture);
+  else finishBox(gesture);
+}
+
+function finishInk(gesture) {
+  if (gesture.points.length < 2) return;
+  const points = gesture.points.map(([x, y]) => viewPointToPdf(gesture.page, x, y));
+  const box = bounds(points);
+  if (box[2] - box[0] < 0.5 && box[3] - box[1] < 0.5) return;   // a stray click
+  const ann = addAnnotation({ kind: "ink", page: gesture.page.index, points, tool: "pen" });
+  // The pen stays active, so the new stroke is not selected: the next stroke
+  // should use the brush the toolbar is showing, not the last stroke's settings.
+  renderChangeList();
+  updateExportButton();
+  positionAnnotation(ann);
+}
+
+function bounds(points) {
+  const xs = points.map((p) => p[0]);
+  const ys = points.map((p) => p[1]);
+  return [Math.min(...xs), Math.min(...ys), Math.max(...xs), Math.max(...ys)];
+}
+
+function defaultImageRect(image, page, point) {
+  const aspect = image.width / image.height || 1;
+  const width = Math.min(240, page.unscaled.width * 0.35);
+  return [point[0], point[1], point[0] + width, point[1] + width / aspect];
+}
+
+/** Keep an image's proportions when the drawn box is a different shape. */
+function fitImageAspect(image, rect) {
+  const aspect = image.width / image.height || 1;
+  let width = Math.max(rect[2] - rect[0], 1);
+  let height = width / aspect;
+  if (height > rect[3] - rect[1]) {
+    height = Math.max(rect[3] - rect[1], 1);
+    width = height * aspect;
+  }
+  return [rect[0], rect[1], rect[0] + width, rect[1] + height];
+}
+
+function finishBox(gesture) {
+  const tool = gesture.tool;
+  const page = gesture.page;
+  const style = state.style;
+  const startPdf = viewPointToPdf(page, gesture.start[0], gesture.start[1]);
+  const endPdf = viewPointToPdf(page, gesture.last[0], gesture.last[1]);
+
+  if (tool === "image") {
+    const image = state.pendingImage;
+    if (!image) { setStatus("Choose an image first, then drag where it should go.", "err"); return; }
+    const rect = gesture.moved
+      ? fitImageAspect(image, bounds([startPdf, endPdf]))
+      : defaultImageRect(image, page, startPdf);
+    const ann = addAnnotation({ kind: "image", page: page.index, rect, image, tool: "image" });
+    state.pendingImage = null;
+    setTool("select");
+    selectObject(ann);
+    setStatus(`Inserted ${image.name || "the image"}. Drag it to move, or use the handle to resize.`, "ok");
+    renderChangeList();
+    updateExportButton();
+    return;
+  }
+
+  if (tool === "text") {
+    const rect = gesture.moved
+      ? bounds([startPdf, endPdf])
+      : [startPdf[0], startPdf[1], startPdf[0] + 170, startPdf[1] + style.size * 1.6];
+    const ann = addAnnotation({ kind: "text", page: page.index, rect, text: "", tool: "text" });
+    setTool("select");
+    selectObject(ann);
+    beginTextEdit(ann);
+    renderChangeList();
+    updateExportButton();
+    return;
+  }
+
+  // Shapes and arrows are only meaningful as a drag.
+  if (!gesture.moved) return;
+  const box = bounds([startPdf, endPdf]);
+  if (box[2] - box[0] < 1 && box[3] - box[1] < 1) return;
+
+  if (tool === "highlight") {
+    // Dragged along a line, so a perfectly flat drag is the normal gesture
+    // rather than a mistake. Snap to the words underneath and emit one band per
+    // line covered -- which also makes a multi-line drag do the obvious thing.
+    const bands = highlightBands(page, box);
+    // The highlighter stays active and does not select what it just drew, exactly
+    // like the pen: the next sweep should use the brush the toolbar is showing.
+    for (const rect of bands) {
+      addAnnotation({ kind: "highlight", page: page.index, rect, tool });
+    }
+    setStatus(bands.length
+      ? `Highlighted ${bands.length} line${bands.length === 1 ? "" : "s"} — carry on, or press V to select.`
+      : "Nothing to highlight under that sweep.", bands.length ? "ok" : "err");
+    renderChangeList();
+    updateExportButton();
+    return;
+  }
+
+  const ann = ["arrow", "line"].includes(tool)
+    ? addAnnotation({ kind: tool, page: page.index, points: [startPdf, endPdf], tool })
+    : addAnnotation({ kind: tool, page: page.index, rect: box, tool });
+  if (ONE_SHOT_TOOLS.has(tool)) setTool("select");
+  if (state.tool === "select") selectObject(ann);
+  renderChangeList();
+  updateExportButton();
+}
+
+/**
+ * The highlighter's bands, snapped to the glyphs the sweep touched.
+ *
+ * Uses the page's own text-layer boxes, so the band is the height of the text
+ * rather than of the drag -- a flat sweep across a line would otherwise be a
+ * zero-height rectangle. Falls back to a thin band when the sweep catches no
+ * text at all.
+ */
+function highlightBands(page, box) {
+  const bands = new Map();
+  for (const span of page.layer.children) {
+    const rect = cssBoxToPdf(page, ...elementBoxInPage(page, span));
+    if (rect[3] < box[1] - 1 || rect[1] > box[3] + 1) continue;      // a different line
+    if (rect[2] < box[0] - 1 || rect[0] > box[2] + 1) continue;      // no overlap along the line
+    const key = Math.round(rect[1] / 3);
+    const band = bands.get(key) || { top: Infinity, bottom: -Infinity, left: Infinity, right: -Infinity };
+    band.top = Math.min(band.top, rect[1]);
+    band.bottom = Math.max(band.bottom, rect[3]);
+    band.left = Math.min(band.left, rect[0]);
+    band.right = Math.max(band.right, rect[2]);
+    bands.set(key, band);
+  }
+  if (!bands.size) {
+    if (box[3] - box[1] >= 1.5) return [box];
+    const y = (box[1] + box[3]) / 2;
+    return [[box[0], y - 6.5, box[2], y + 6.5]];
+  }
+  // Clipped to the sweep: pdf.js text items are runs, often a whole line, so
+  // without this a three-word sweep would highlight the entire line. The height
+  // still comes from the glyphs, which is the part a flat drag cannot supply.
+  return [...bands.values()]
+    .map((b) => [Math.max(b.left, box[0]), b.top - 0.5, Math.min(b.right, box[2]), b.bottom + 0.5])
+    .filter((rect) => rect[2] - rect[0] > 0.5);
+}
+
+function onObjectPointerDown(ev, ann) {
+  if (state.tool !== "select" || ev.button !== 0) return;
+  ev.stopPropagation();
+  if (ev.target === ann.kill) return;
+  if (ann.editing) return;                     // let the caret do its job
+  selectObject(ann);
+  ev.preventDefault();
+  const page = state.pages[ann.page];
+  const point = localPoint(page, ev);
+  state.gesture = {
+    mode: ev.target === ann.handle ? "resize" : "move",
+    page, ann, moved: false,
+    startPdf: viewPointToPdf(page, point[0], point[1]),
+    startBox: annotationBox(ann),
+    startRect: ann.rect ? [...ann.rect] : null,
+    startPoints: ann.points.map((p) => [...p]),
+  };
+  window.addEventListener("pointermove", onObjectMove);
+  window.addEventListener("pointerup", onObjectUp);
+}
+
+function remapAnnotation(ann, from, to, startRect, startPoints) {
+  const sx = (to[2] - to[0]) / Math.max(from[2] - from[0], 1e-6);
+  const sy = (to[3] - to[1]) / Math.max(from[3] - from[1], 1e-6);
+  const map = ([x, y]) => [to[0] + (x - from[0]) * sx, to[1] + (y - from[1]) * sy];
+  if (startPoints.length) ann.points = startPoints.map(map);
+  if (startRect) ann.rect = to;
+}
+
+function onObjectMove(ev) {
+  const gesture = state.gesture;
+  if (!gesture || !gesture.ann) return;
+  const point = localPoint(gesture.page, ev);
+  const now = viewPointToPdf(gesture.page, point[0], point[1]);
+  const dx = now[0] - gesture.startPdf[0];
+  const dy = now[1] - gesture.startPdf[1];
+  if (Math.hypot(dx, dy) > 0.4) gesture.moved = true;
+  const ann = gesture.ann;
+  if (gesture.mode === "move") {
+    if (gesture.startRect) {
+      ann.rect = [gesture.startRect[0] + dx, gesture.startRect[1] + dy,
+                  gesture.startRect[2] + dx, gesture.startRect[3] + dy];
+    }
+    if (gesture.startPoints.length) {
+      ann.points = gesture.startPoints.map(([x, y]) => [x + dx, y + dy]);
+    }
+  } else {
+    const from = gesture.startBox;
+    const to = [from[0], from[1], Math.max(from[0] + 4, from[2] + dx),
+                Math.max(from[1] + 4, from[3] + dy)];
+    remapAnnotation(ann, from, to, gesture.startRect, gesture.startPoints);
+  }
+  positionAnnotation(ann);
+}
+
+function onObjectUp() {
+  const gesture = state.gesture;
+  state.gesture = null;
+  window.removeEventListener("pointermove", onObjectMove);
+  window.removeEventListener("pointerup", onObjectUp);
+  if (!gesture || !gesture.ann || !gesture.moved) return;
+  // The face a text box matches depends on where it now sits, so re-resolve it.
+  if (gesture.ann.kind === "text") gesture.ann.matchStack = nearestTextStack(gesture.ann);
+  renderChangeList();
+}
+
+// ---------------------------------------------------------------------------
+// sidebar
+// ---------------------------------------------------------------------------
+
+function renderChangeList() {
+  const edits = [...state.edits.values()].sort((a, b) => a.page - b.page || a.rect[1] - b.rect[1]);
+  const markups = [...state.annotations.values()]
+    .sort((a, b) => a.page - b.page || annotationBox(a)[1] - annotationBox(b)[1]);
+  const total = edits.length + markups.length;
+  $("changeCount").textContent = total ? `(${total})` : "";
+  if (!total) {
+    changesEl.innerHTML = '<div class="empty-note">Nothing yet. Click text to rewrite it, or draw on the page with a tool from the toolbar.</div>';
+    return;
+  }
+  const fragment = document.createDocumentFragment();
+  for (const ann of markups) {
+    const row = document.createElement("div");
+    row.className = "change annot";
+    if (state.selected === ann) row.classList.add("selected");
+    const label = ANNOT_NAME[ann.kind] || "Markup";
+    const body = ann.kind === "text"
+      ? `<span class="new" style="color:${escapeHtml(ann.color)}">${escapeHtml(ann.text) || "<em>empty</em>"}</span>`
+      : `<span class="new">${escapeHtml(label)}</span>`;
+    row.innerHTML = `
+      <div class="pg">p${ann.page + 1}</div>
+      <div>
+        <div><span class="kindchip">${escapeHtml(label)}</span>
+          <span class="swatch" style="background:${escapeHtml(ann.color)}"></span>${body}</div>
+        <div class="detail">${escapeHtml(markupSummary(ann))}</div>
+      </div>
+      <button class="rm" title="Delete this markup">×</button>`;
+    row.addEventListener("click", (ev) => {
+      if (ev.target.classList.contains("rm")) return;
+      state.pages[ann.page]?.wrap.scrollIntoView({ block: "center", behavior: "smooth" });
+      selectObject(ann);
+    });
+    row.querySelector(".rm").addEventListener("click", () => removeAnnotation(ann.id));
+    fragment.append(row);
+  }
+  for (const edit of edits) {
+    const row = document.createElement("div");
+    row.className = "change";
+    if (state.selected === edit) row.classList.add("selected");
+    row.innerHTML = `
+      <div class="pg">p${edit.page + 1}</div>
+      <div>
+        <div class="old">${escapeHtml(edit.original) || "<em>blank</em>"}</div>
+        <div class="new ${edit.text.trim() ? "" : "empty"}" style="${escapeHtml(fontCss(edit))}">
+          <span class="swatch" style="background:${escapeHtml(edit.textColor || "#111")}"></span>${escapeHtml(edit.text) || "— deleted —"}${weightTags(edit.bold, edit.italic)}</div>
+        ${flagFor(edit)}
+      </div>
+      <button class="rm" title="Discard">×</button>`;
+    row.addEventListener("click", (ev) => {
+      if (ev.target.classList.contains("rm")) return;
+      const page = state.pages[edit.page];
+      page?.wrap.scrollIntoView({ block: "center", behavior: "smooth" });
+      selectObject(edit);
+      focusEdit(edit);
+    });
+    row.querySelector(".rm").addEventListener("click", () => removeEdit(edit.id));
+    fragment.append(row);
+  }
+  changesEl.textContent = "";
+  changesEl.append(fragment);
+}
+
+/** The same geometry summary the export report will print, in the user's terms. */
+function markupSummary(ann) {
+  const box = annotationBox(ann);
+  const parts = [];
+  if (VECTOR_KINDS.has(ann.kind)) {
+    parts.push(ann.kind === "ink" ? `${ann.points.length} points · ${ann.width}pt`
+      : `${Math.hypot(ann.points.at(-1)[0] - ann.points[0][0], ann.points.at(-1)[1] - ann.points[0][1]).toFixed(0)}pt long · ${ann.width}pt`);
+  } else {
+    parts.push(`${(box[2] - box[0]).toFixed(0)}×${(box[3] - box[1]).toFixed(0)}pt at ${box[0].toFixed(0)},${box[1].toFixed(0)}`);
+    if (FILLABLE_KINDS.has(ann.kind) && ann.fill) parts.push("filled");
+    if (ann.kind === "highlight") parts.push(`${Math.round(ann.opacity * 100)}% opacity`);
+  }
+  if (ann.kind === "text") parts.push(`${ann.size}pt`);
+  return parts.join(" · ");
+}
+
+function flagFor(edit) {
+  if (edit.resolveState === "pending") return '<span class="flag">checking…</span>';
+  if (edit.resolveState === "missing") return '<span class="flag">no text found here — the server would not remove anything</span>';
+  if (edit.resolveState === "mismatch") return `<span class="flag">server reads: ${escapeHtml(edit.resolve?.text || "")}</span>`;
+  if (edit.resolveState === "error") return '<span class="flag">could not reach the server to verify</span>';
+  return "";
+}
+
+function setStatus(text, kind = "") {
+  $("status").className = `status ${kind}`;
+  $("statusText").textContent = text;
+}
+
+function updateExportButton() {
+  const n = state.edits.size + state.annotations.size;
+  const btn = $("exportBtn");
+  btn.disabled = !state.meta || n === 0 || state.busy;
+  btn.textContent = n ? `Export PDF (${n})` : "Export PDF";
+  const marks = state.annotations.size;
+  $("clearMarkups").disabled = n === 0;
+  $("clearMarkups").title = n
+    ? `Remove ${state.edits.size} text change${state.edits.size === 1 ? "" : "s"} and ${marks} markup${marks === 1 ? "" : "s"}`
+    : "Nothing to clear yet";
+}
+
+// ---------------------------------------------------------------------------
+// upload / export
+// ---------------------------------------------------------------------------
+
+async function uploadBlob(blob, filename) {
+  const form = new FormData();
+  form.append("file", blob, filename);
+  const res = await fetch("/api/documents", { method: "POST", body: form });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(data.detail || `upload failed (${res.status})`);
+  return data;
+}
+
+async function openFile(file) {
+  if (!file) return;
+  state.busy = true;
+  updateExportButton();
+  setStatus(`Uploading ${file.name}…`);
+  try {
+    const meta = await uploadBlob(file, file.name);
+    await loadMeta(meta);
+  } catch (err) {
+    setStatus(String(err.message || err), "err");
+  } finally {
+    state.busy = false;
+    updateExportButton();
+  }
+}
+
+async function loadSample() {
+  state.busy = true;
+  updateExportButton();
+  setStatus("Building the sample document…");
+  try {
+    const res = await fetch("/api/sample");
+    const meta = await res.json();
+    if (!res.ok) throw new Error(meta.detail || "could not build the sample");
+    await loadMeta(meta);
+  } catch (err) {
+    setStatus(String(err.message || err), "err");
+  } finally {
+    state.busy = false;
+    updateExportButton();
+  }
+}
+
+async function exportPdf() {
+  if (!state.meta || !(state.edits.size + state.annotations.size)) return;
+  state.busy = true;
+  updateExportButton();
+  setStatus(`Applying ${state.edits.size} text change${state.edits.size === 1 ? "" : "s"} and ${state.annotations.size} markup${state.annotations.size === 1 ? "" : "s"} on the server…`);
+  const autofit = $("autofit").checked;
+  const payload = {
+    edits: [...state.edits.values()].map((edit) => ({
+      page: edit.page,
+      rect: edit.rect.map((v) => +v.toFixed(3)),
+      // Blank text means "remove this text", not "write nothing".
+      mode: edit.text.trim() ? "replace" : "delete",
+      text: edit.text.trim(),
+      // Typography stays null unless the user asked for a specific face, size or
+      // colour: left alone, the server reuses the document's own so the exported
+      // file cannot drift from the original.
+      font: edit.fontOverride || null,
+      size: edit.sizeOverride || null,
+      color: edit.colorOverride ? hexToFloats(edit.colorOverride) : null,
+      align: edit.alignOverride || 0,
+      autofit,
+    })),
+    // Markups travel as geometry and are redrawn server-side, so the export never
+    // depends on how the browser happened to paint the preview.
+    annotations: [...state.annotations.values()].map(annotationPayload),
+  };
+  try {
+    const res = await fetch(`/api/documents/${state.meta.id}/export`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.detail || `export failed (${res.status})`);
+    const bytes = base64ToBytes(data.pdf);
+    const blob = new Blob([bytes], { type: "application/pdf" });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = data.filename;
+    document.body.append(link);
+    link.click();
+    link.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 60_000);
+    renderReport(data);
+    const { applied, total, failed, unverified } = data.summary;
+    if (failed) setStatus(`Exported with ${failed} problem${failed === 1 ? "" : "s"}. See the report.`, "err");
+    else if (unverified) setStatus(`Exported: ${applied}/${total} changed, ${unverified} could not be verified.`, "");
+    else setStatus(`Exported ${applied} change${applied === 1 ? "" : "s"} into ${data.filename}.`, "ok");
+  } catch (err) {
+    setStatus(String(err.message || err), "err");
+  } finally {
+    state.busy = false;
+    updateExportButton();
+  }
+}
+
+// Short, scannable statuses. The explanation belongs in the note line under the
+// row, not in a badge that has to stay centred in a 92px column.
+const EXPORT_STATUS = {
+  applied: { label: "Replaced", kind: "ok" },
+  applied_approx: { label: "Replaced", kind: "ok", hint: "Coordinates were slightly off; the nearest text was matched." },
+  deleted: { label: "Removed", kind: "ok" },
+  no_text_found: { label: "Not found", kind: "warn", hint: "No text sits at these coordinates, so nothing was removed." },
+  written_unverified: { label: "Unverified", kind: "warn", hint: "Text was written but could not be read back afterwards." },
+  insert_failed: { label: "Failed", kind: "bad", hint: "The replacement could not be written." },
+  invalid: { label: "Invalid", kind: "bad", hint: "The edit request was rejected." },
+  page_out_of_range: { label: "No page", kind: "bad", hint: "That page does not exist in the document." },
+};
+
+// Markups have their own vocabulary: "Drawn" reads better than "Replaced".
+const MARKUP_STATUS = {
+  applied: { label: "Drawn", kind: "ok" },
+  invalid: { label: "Not drawn", kind: "bad", hint: "The markup was rejected, so nothing was drawn." },
+  insert_failed: { label: "Failed", kind: "bad", hint: "The markup could not be drawn on the page." },
+  written_unverified: { label: "Check it", kind: "warn", hint: "It was drawn, but not everything about it could be confirmed." },
+  page_out_of_range: { label: "No page", kind: "bad", hint: "That page does not exist in the document." },
+};
+
+function renderReport(data) {
+  const rows = data.report || [];
+  if (!rows.length) { reportEl.textContent = ""; return; }
+
+  const changed = rows.filter((r) => ["applied", "applied_approx", "deleted"].includes(r.status)).length;
+  const flagged = rows.length - changed;
+  const details = [data.filename, data.size ? formatSize(data.size) : ""].filter(Boolean);
+
+  const head = document.createElement("div");
+  head.className = "head";
+  head.innerHTML = `
+    <div class="top">
+      <h2>Last export</h2>
+      <span class="counts">
+        <span class="ok">${changed} changed</span>${flagged ? ` · <span class="warn">${flagged} flagged</span>` : ""}
+      </span>
+    </div>
+    ${details.length ? `<div class="file" title="${escapeHtml(details.join(" · "))}">${escapeHtml(details.join(" · "))}</div>` : ""}`;
+
+  const list = document.createElement("div");
+  list.className = "rows";
+  for (const row of rows) {
+    const isMarkup = row.kind === "annotation";
+    const table = isMarkup ? MARKUP_STATUS : EXPORT_STATUS;
+    const status = table[row.status] || EXPORT_STATUS[row.status] || { label: row.status, kind: "bad" };
+    const div = document.createElement("div");
+    div.className = "row";
+    const meta = [];
+    if (row.color) {
+      meta.push(`<span class="swatch" title="${escapeHtml(row.color)}" style="background:${escapeHtml(row.color)}"></span>`);
+    }
+    if (row.detail) meta.push(`<span>${escapeHtml(row.detail)}</span>`);
+    if (row.font) meta.push(`<span>${escapeHtml(row.font)}${row.size ? ` · ${row.size}pt` : ""}</span>`);
+    if (row.font_source) {
+      meta.push(`<span class="fontpill ${fontPillKind(row.font_source)}" title="${escapeHtml(row.font_note || "")}">${escapeHtml(FONT_LABELS[row.font_source] || row.font_source)}</span>`);
+    }
+    meta.push(weightTags(row.bold, row.italic));
+    const metaLine = row.font || isMarkup ? `<div class="meta-line">${meta.join("")}</div>` : "";
+    // A markup has no "before": it is a label (and, for a text box, its text).
+    const summary = isMarkup
+      ? [row.label, row.new_text ? `“${row.new_text}”` : ""].filter(Boolean).join(" ")
+      : [row.original_text ? `“${row.original_text}”` : "no text",
+         row.new_text ? ` → “${row.new_text}”` : ""].join("");
+    const line = isMarkup
+      ? `<div class="line" title="${escapeHtml(summary)}">
+           <span class="pg">p${(row.page ?? 0) + 1}</span>
+           <span class="new">${escapeHtml(row.label || "Markup")}</span>
+           ${row.new_text ? `<span class="arrow">·</span> <span class="new">“${escapeHtml(row.new_text)}”</span>` : ""}
+         </div>`
+      : `<div class="line" title="${escapeHtml(summary)}">
+           <span class="pg">p${(row.page ?? 0) + 1}</span>
+           ${row.original_text
+             ? `<span class="old">“${escapeHtml(row.original_text)}”</span>`
+             : '<span class="old"><em>no text</em></span>'}
+           ${row.new_text ? `<span class="arrow">→</span> <span class="new">“${escapeHtml(row.new_text)}”</span>` : ""}
+         </div>`;
+    div.innerHTML = `
+      <span class="pill ${status.kind}" title="${escapeHtml(status.hint || "")}">
+        <span class="dot"></span>${escapeHtml(status.label)}
+      </span>
+      <div class="body">${line}${metaLine}
+        ${(row.warnings || []).map((w) => `<div class="note warn">${escapeHtml(w)}</div>`).join("")}
+        ${row.font_note ? `<div class="note" title="${escapeHtml(row.font_note)}">${escapeHtml(row.font_note)}</div>` : ""}
+      </div>`;
+    list.append(div);
+  }
+
+  reportEl.textContent = "";
+  reportEl.append(head, list);
+}
+
+// ---------------------------------------------------------------------------
+// helpers + wiring
+// ---------------------------------------------------------------------------
+
+// How faithful each replacement's typeface is, in the user's terms.
+const FONT_LABELS = {
+  exact: "document's own font",
+  matched: "closest installed match",
+  approximate: "approximated",
+  requested: "as requested",
+};
+const fontPillKind = (source) =>
+  source === "exact" ? "ok" : source === "matched" ? "info" : "warn";
+
+const escapeHtml = (s) => String(s ?? "").replace(/[&<>"']/g, (c) =>
+  ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+
+const formatSize = (bytes) =>
+  bytes > 1024 * 1024 ? `${(bytes / 1024 / 1024).toFixed(1)} MB` : `${Math.max(1, Math.round(bytes / 1024))} KB`;
+
+function base64ToBytes(b64) {
+  const binary = atob(b64);
+  const out = new Uint8Array(binary.length);
+  for (let i = 0; i < binary.length; i++) out[i] = binary.charCodeAt(i);
+  return out;
+}
+
+async function setZoom(scale) {
+  state.scale = Math.min(3, Math.max(0.35, scale));
+  $("zoomLabel").textContent = `${Math.round(state.scale * 100)}%`;
+  if (!state.pdf) return;
+  const token = ++state.renderToken;
+  for (const page of state.pages) {
+    if (token !== state.renderToken) return;
+    await paintPage(page);
+  }
+  repositionAll();
+}
+
+viewer.addEventListener("click", (ev) => {
+  if (!state.pdf || state.tool !== "select") return;
+  if (ev.target.closest(".edit")) return;
+  const span = ev.target.closest(".text-layer span");
+  if (!span) return;
+  const layer = span.parentElement;
+  const page = state.pages.find((p) => p.layer === layer);
+  if (!page) return;
+  // Claim the event, otherwise it bubbles on to the click-outside handler below
+  // and immediately commits the edit this very click just opened.
+  ev.pdfEditorHandled = true;
+  beginEditFromSpan(page, span);
+});
+
+// ---- toolbar wiring --------------------------------------------------------
+
+/** The value the toolbar's controls should show: the selection, else the brush. */
+function activeValue(name, fallback) {
+  const sel = state.selected;
+  if (sel && state.annotations.has(sel.id)) return sel[name] ?? fallback;
+  if (sel && state.edits.has(sel.id)) {
+    if (name === "family") return sel.familyOverride || "";
+    if (name === "size") return sel.sizeOverride || sel.displaySize || fallback;
+    if (name === "align") return sel.alignOverride || 0;
+    if (name === "bold") return sel.bold === true;
+    if (name === "italic") return sel.italic === true;
+    if (name === "color") return sel.colorOverride || cssToHex(sel.textColor) || fallback;
+  }
+  return state.style[name] ?? fallback;
+}
+
+function activeFill() {
+  const sel = state.selected;
+  if (sel && state.annotations.has(sel.id)) return !!sel.fill;
+  return !!state.style.fill;
+}
+
+for (const color of PALETTE) {
+  const btn = document.createElement("button");
+  btn.className = "swatch-btn";
+  btn.dataset.color = color;
+  btn.style.background = color;
+  btn.title = color;
+  btn.setAttribute("aria-pressed", "false");
+  btn.addEventListener("click", () => applyStyleChange("color", color));
+  $("inkSwatches").append(btn);
+}
+
+$("toolButtons").addEventListener("click", (ev) => {
+  const btn = ev.target.closest(".tbtn");
+  if (btn) setTool(btn.dataset.tool);
+});
+$("inkColor").addEventListener("input", (ev) => applyStyleChange("color", ev.target.value));
+$("inkWidth").addEventListener("input", (ev) => applyStyleChange("width", parseFloat(ev.target.value)));
+$("inkOpacity").addEventListener("input", (ev) => applyStyleChange("opacity", parseFloat(ev.target.value)));
+$("fillBtn").addEventListener("click", () => applyStyleChange("fill", !activeFill()));
+$("fontFamily").addEventListener("change", (ev) => applyStyleChange("family", ev.target.value));
+$("fontSize").addEventListener("change", (ev) =>
+  applyStyleChange("size", Math.max(4, Math.min(200, parseFloat(ev.target.value) || 12))));
+$("boldBtn").addEventListener("click", () => applyStyleChange("bold", !activeValue("bold", false)));
+$("italicBtn").addEventListener("click", () => applyStyleChange("italic", !activeValue("italic", false)));
+$("alignLeft").addEventListener("click", () => applyStyleChange("align", 0));
+$("alignCenter").addEventListener("click", () => applyStyleChange("align", 1));
+$("alignRight").addEventListener("click", () => applyStyleChange("align", 2));
+$("resetStyleBtn").addEventListener("click", resetSelectedStyle);
+$("deleteObject").addEventListener("click", deleteSelectedObject);
+$("clearMarkups").addEventListener("click", clearAll);
+$("pickImage").addEventListener("click", () => $("imageInput").click());
+$("imageInput").addEventListener("change", onPickImage);
+
+const readAsDataURL = (file) => new Promise((resolve, reject) => {
+  const reader = new FileReader();
+  reader.onload = () => resolve(String(reader.result));
+  reader.onerror = () => reject(new Error("could not read that file"));
+  reader.readAsDataURL(file);
+});
+
+const loadImage = (src) => new Promise((resolve, reject) => {
+  const img = new Image();
+  img.onload = () => resolve(img);
+  img.onerror = () => reject(new Error("that file is not an image the browser can read"));
+  img.src = src;
+});
+
+async function onPickImage(ev) {
+  const file = ev.target.files?.[0];
+  ev.target.value = "";
+  if (!file) return;
+  if (file.size > 6 * 1024 * 1024) {
+    setStatus(`"${file.name}" is ${formatSize(file.size)} — images must be under 6 MB.`, "err");
+    return;
+  }
+  try {
+    const dataUrl = await readAsDataURL(file);
+    const image = await loadImage(dataUrl);
+    state.pendingImage = {
+      dataUrl,
+      mime: file.type || "image/png",
+      name: file.name,
+      width: image.naturalWidth || image.width || 100,
+      height: image.naturalHeight || image.height || 100,
+    };
+    setTool("image");
+    setStatus(`Drag on a page to place "${file.name}".`, "ok");
+  } catch (err) {
+    setStatus(String(err.message || err), "err");
+  }
+}
+
+function onViewerPointerDown(ev) {
+  if (!state.pdf || ev.button !== 0) return;
+  if (state.tool === "select") {
+    // Clicking anything that is not a markup, a run of text or an edit box means
+    // "I am done with this one" -- including the empty part of a page, not just
+    // the grey margin around it.
+    const target = ev.target;
+    const onSomething = target.closest?.(".annot") || target.closest?.(".text-layer span")
+      || target.closest?.(".edit");
+    if (!onSomething) clearSelection();
+    return;
+  }
+  const page = pageOf(ev.target);
+  if (!page) return;
+  ev.preventDefault();
+  startDraw(ev, page);
+}
+
+viewer.addEventListener("pointerdown", onViewerPointerDown);
+
+document.addEventListener("keydown", (ev) => {
+  if (ev.ctrlKey || ev.metaKey || ev.altKey) return;
+  const target = ev.target;
+  // Never steal a keystroke from a text box the user is typing in.
+  if (target instanceof HTMLElement
+      && (target.isContentEditable || /^(INPUT|SELECT|TEXTAREA)$/.test(target.tagName))) return;
+  if (ev.key === "Escape") {
+    clearSelection();
+    setTool("select");
+    return;
+  }
+  if ((ev.key === "Delete" || ev.key === "Backspace") && state.selected) {
+    ev.preventDefault();
+    deleteSelectedObject();
+    return;
+  }
+  const tool = TOOL_KEYS[ev.key.toLowerCase()];
+  if (tool) {
+    ev.preventDefault();
+    setTool(tool);
+  }
+});
+
+$("fileInput").addEventListener("change", (ev) => {
+  openFile(ev.target.files?.[0]);
+  ev.target.value = "";
+});
+$("sampleBtn").addEventListener("click", loadSample);
+$("sampleBtn2").addEventListener("click", loadSample);
+$("exportBtn").addEventListener("click", exportPdf);
+$("zoomIn").addEventListener("click", () => setZoom(state.scale * 1.2));
+$("zoomOut").addEventListener("click", () => setZoom(state.scale / 1.2));
+$("autofit").addEventListener("change", () => {});
+document.addEventListener("keydown", (ev) => {
+  if ((ev.ctrlKey || ev.metaKey) && ev.key === "0") { ev.preventDefault(); setZoom(1); }
+  if ((ev.ctrlKey || ev.metaKey) && (ev.key === "+" || ev.key === "=")) { ev.preventDefault(); setZoom(state.scale * 1.2); }
+  if ((ev.ctrlKey || ev.metaKey) && ev.key === "-") { ev.preventDefault(); setZoom(state.scale / 1.2); }
+});
+window.addEventListener("resize", debounce(() => { if (state.pdf) repositionAll(); }, 150));
+viewer.addEventListener("wheel", (ev) => {
+  if (!(ev.ctrlKey || ev.metaKey)) return;
+  ev.preventDefault();
+  setZoom(state.scale * (ev.deltaY < 0 ? 1.1 : 1 / 1.1));
+}, { passive: false });
+
+function debounce(fn, wait) {
+  let timer;
+  return (...args) => { clearTimeout(timer); timer = setTimeout(() => fn(...args), wait); };
+}
+
+document.addEventListener("click", (ev) => {
+  if (ev.pdfEditorHandled) return;
+  if (!state.activeId || ev.target.closest(".edit")) return;
+  const edit = state.edits.get(state.activeId);
+  if (edit) commitEdit(edit);
+  state.activeId = null;
+  document.querySelectorAll(".edit.editing").forEach((el) => el.classList.remove("editing"));
+});
+
+setTool("select");
+updateExportButton();
+
+fetch("/api/health").then((r) => r.json()).then((h) => {
+  if (h.ok) setStatus(`Ready. Backend online · PyMuPDF ${h.pymupdf}.`);
+}).catch(() => setStatus("Backend unreachable.", "err"));
+
+/**
+ * Round-trip the point converters, the way `selfTest` does for boxes.
+ *
+ * A markup's path is built from these, so a mismatch here would put a pen
+ * stroke somewhere other than where it was drawn -- and only on a rotated page,
+ * which is exactly the case that is easy to miss.
+ */
+function pointSelfTest() {
+  const results = [];
+  for (const page of state.pages) {
+    for (const probe of [[10, 10], [120, 240], [300, 60]]) {
+      const [px, py] = viewPointToPdf(page, probe[0], probe[1]);
+      const back = pdfPointToView(page, [px, py]);
+      results.push({
+        page: page.index, rotation: page.pdfPage.rotate, probe,
+        drift: +Math.max(Math.abs(back[0] - probe[0]), Math.abs(back[1] - probe[1])).toFixed(4),
+      });
+    }
+  }
+  return results;
+}
+
+// Exposed for quick console poking (and used by the coordinate self-check).
+window.pdfEditor = {
+  state, cssBoxToPdf, pdfBoxToCss, selfTest, pointSelfTest,
+  setTool, selectObject, addAnnotation, annotationPayload, applyStyleChange, annotationBox,
+};
+</script>
+</body>
+</html>

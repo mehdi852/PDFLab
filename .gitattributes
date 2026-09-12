@@ -1,0 +1,7 @@
+# One line ending for everybody: LF in the repository and in checkouts.
+* text=auto eol=lf
+
+# Recorded media and generated documents are binary.
+*.gif binary
+*.webm binary
+*.pdf binary
